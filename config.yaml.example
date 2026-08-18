@@ -38,3 +38,9 @@ inference:
 # <|im_end|>) is Qwen3's; for another model family, re-derive:
 #   tokenizer.convert_tokens_to_ids("<end-of-turn token>")
 #end_of_turn_token_id: 151645
+# Thinking mode. Off by default. `medium` is the conventional ON (every
+# non-off pi level is wire-equivalent under qwen-chat-template); a bare
+# `on` is a YAML boolean and is rejected by name. Switching modes is a
+# config edit + `./bootstrap.py up` — pins re-derive for the mode and the
+# Polar services restart so the receiver's archive stamp follows.
+#thinking: medium

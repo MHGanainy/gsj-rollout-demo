@@ -141,7 +141,7 @@ def load_demo_config(path: Path) -> dict:
     except yaml.YAMLError as exc:
         die(f"{path} is not valid YAML: {exc}", "fix the syntax and re-run")
     allowed = {"corpus", "inference", "context_window", "max_tokens",
-               "end_of_turn_token_id"}
+               "end_of_turn_token_id", "thinking"}
     unknown = set(raw) - allowed
     if unknown:
         die(f"{path}: unknown key(s) {sorted(unknown)}.",
@@ -158,6 +158,22 @@ def load_demo_config(path: Path) -> dict:
     if bad:
         die(f"{path}: inference: unknown key(s) {sorted(bad)}.",
             "inference takes exactly base_url and model")
+    if "thinking" in raw:
+        # YAML 1.1: bare off/no/false arrive as boolean False — the library
+        # deliberately maps that to "off", so accept it; bare `on` (True) is
+        # the clamp trap, rejected by name before the library ever sees it.
+        if raw["thinking"] is False:
+            raw["thinking"] = "off"
+        elif raw["thinking"] is True:
+            die(f"{path}: `thinking: on` (unquoted) is a YAML boolean, "
+                "not a pi level.",
+                "use   thinking: medium   (the conventional ON — every "
+                "non-off pi level is wire-equivalent) or delete the key")
+        elif raw["thinking"] not in (
+                "off", "minimal", "low", "medium", "high", "xhigh", "max"):
+            die(f"{path}: thinking: {raw['thinking']!r} is not a pi level.",
+                "one of off|minimal|low|medium|high|xhigh|max — `medium` is "
+                "the conventional ON; delete the key for off")
     if str(inf["base_url"]).rstrip("/").endswith("/v1"):
         die(f"{path}: inference.base_url must NOT end in /v1 — Polar's gateway "
             "appends /v1/chat/completions itself (a suffixed URL dies at run "
@@ -450,9 +466,14 @@ def mcp_up_wait() -> None:
 
 # ---------------------------------------------------------------------- pins
 
-def derive_pins(corpus: Path, model: str) -> None:
+def derive_pins(corpus: Path, model: str, thinking: str) -> None:
     from importlib.util import find_spec
-    packaged = Path(find_spec("gsj_rollout").origin).parent / "pins" / "pins.gsj.json"
+    pins_root = Path(find_spec("gsj_rollout").origin).parent / "pins"
+    # ADR-0024: a non-off thinking level needs the thinking-on pins on both
+    # law-6 legs; the pins document's own `mode` key keeps the receiver's
+    # archive stamp truthful about which mode landed each trace.
+    packaged = (pins_root / "thinking-on" / "pins.gsj.json"
+                if thinking != "off" else pins_root / "pins.gsj.json")
     doc = json.loads(packaged.read_text())
 
     ref_prompt = (HERE / "estate" / "system_prompt.reference.txt").read_bytes()
@@ -485,7 +506,8 @@ def derive_pins(corpus: Path, model: str) -> None:
     out = ESTATE / "pins.gsj.json"
     out.write_text(json.dumps(doc, indent=2) + "\n")
     say(f"pins — derived for THIS estate at {out}: {len(cards)} skill card(s) approved "
-        f"(G1), system prompt re-derived for your AGENTS.md (G2)")
+        f"(G1), system prompt re-derived for your AGENTS.md (G2); mode "
+        f"{doc.get('mode', 'thinking-off')} (from config `thinking: {thinking}`)")
     if corpus_agents == ref_agents:
         say("pins — your AGENTS.md is the reference text, so G2 equals the packaged pin")
     if model != "Qwen/Qwen3-0.6B":
@@ -525,6 +547,8 @@ def write_rollout_yaml(demo: dict) -> str:
                      "traces_dir": "/estate/traces"},
     }
     harness = {}
+    if demo.get("thinking", "off") != "off":
+        harness["thinking"] = str(demo["thinking"])
     if "context_window" in demo:
         harness["context_window"] = int(demo["context_window"])
     if "max_tokens" in demo:
@@ -567,10 +591,32 @@ def ensure_sandbox_image() -> None:
             "(docker save/load or skopeo) and re-run — local images are used as-is")
 
 
-def polar_up() -> None:
-    say("polar — docker compose up (rollout server, gateway, receiver)")
-    if run(compose_cmd("up", "-d", "polar-rollout", "polar-gateway",
-                       "receiver")).returncode != 0:
+def estate_digest() -> str:
+    """The generated files the Polar services read at START (the receiver
+    reads pins at construction — the archive's mode stamp; the rollout server
+    reads the rendered topology). When these change on a running estate,
+    `up -d` alone would leave the services running on the OLD bytes. The
+    comparison baseline is the digest RECORDED at the last successful polar
+    bring-up (work/estate/.polar-digest) — not the disk at the start of this
+    run, which an interrupted `up` could have already overwritten."""
+    digest = hashlib.sha256()
+    for name in ("pins.gsj.json", "rollout.yaml", "topology.rendered.yaml"):
+        f = ESTATE / name
+        if f.is_file():
+            digest.update(name.encode() + f.read_bytes())
+    return digest.hexdigest()
+
+
+DIGEST_FILE_NAME = ".polar-digest"
+
+
+def polar_up(recreate: bool = False) -> None:
+    say("polar — docker compose up (rollout server, gateway, receiver)"
+        + (" — generated estate files changed since the last bring-up, so "
+           "the three are RECREATED (the receiver reads pins at start — "
+           "the archive's mode stamp depends on it)" if recreate else ""))
+    up = ["up", "-d"] + (["--force-recreate"] if recreate else [])         + ["polar-rollout", "polar-gateway", "receiver"]
+    if run(compose_cmd(*up)).returncode != 0:
         die("`docker compose up` of the Polar services failed.",
             f"the compose error above is authoritative; if the pull failed, load {POLAR_IMAGE} "
             "out-of-band and re-run")
@@ -597,6 +643,7 @@ def polar_up() -> None:
             "gsj-demo-receiver — the gateway registers itself with the rollout server; "
             "no node usually means the gateway crashed")
     say("polar — rollout server reports its gateway node; receiver is listening")
+    (ESTATE / DIGEST_FILE_NAME).write_text(estate_digest() + "\n")
 
 
 def check_engine(url: str, model: str) -> str:
@@ -662,13 +709,19 @@ the endpoint must satisfy (the library's CP-04' engine legs):
     the engine happens to default to.""")
         corpus = Path(demo["corpus"]).resolve()
         print(f"""
-submit one episode (CP-35 walks through this properly):
+submit one episode (the README's walkthrough reads it afterwards):
   docker run --rm --network {NETWORK} \\
     -v {WORK}/estate:/estate -v {corpus}:/corpus \\
     -e GSJ_PINS_PATH=/estate/pins.gsj.json \\
     {POLAR_IMAGE} \\
     gsj-rollout submit --config /estate/rollout.yaml \\
-      --from-bank /corpus/taskbank.parquet --row 0 --out /estate/traces/collected""")
+      --from-bank /corpus/taskbank.parquet --row 0
+
+then read it (the receiver archived it under work/traces/):
+  ./read.py                      what landed, accepted and quarantined
+  ./read.py show                 the latest episode, as a transcript
+  ./read.py quarantine           why anything was rejected, explained
+and before spending episodes on a new endpoint:  ./preflight.py""")
 
 
 # ------------------------------------------------------------------ commands
@@ -705,11 +758,14 @@ def cmd_up(args) -> None:
     pipeline("taskbank", corpus, token, secret)
     pipeline("verify", corpus, token, secret)
 
-    derive_pins(corpus, demo["inference"]["model"])
+    digest_file = ESTATE / DIGEST_FILE_NAME
+    served_digest = digest_file.read_text().strip() if digest_file.is_file() else ""
+    derive_pins(corpus, demo["inference"]["model"],
+                str(demo.get("thinking", "off")))
     engine_container_url = write_rollout_yaml(demo)
     render_topology()
     ensure_sandbox_image()
-    polar_up()
+    polar_up(recreate=served_digest != estate_digest())
 
     engine_state = check_engine(engine_container_url, demo["inference"]["model"])
     say(f"up — complete in {time.monotonic() - _T0:.1f}s total")
