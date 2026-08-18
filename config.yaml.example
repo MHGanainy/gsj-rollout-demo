@@ -1,0 +1,36 @@
+# gsj-rollout-demo — the stranger's config. Copy to config.yaml and fill in.
+#
+# Three values are genuinely yours: where your corpus is, where your
+# inference endpoint is, and what the served model is called. Everything
+# else about the estate (URLs, networks, secrets, ports, pins) is stood up
+# by ./bootstrap.py and therefore derived by it.
+
+# Your corpus, in the contract's shape
+# (https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md).
+# For the worked example: ./synthetic/make_corpus.py writes this tree.
+corpus: ./corpus-synthetic
+
+inference:
+  # Your endpoint's ROOT — no /v1 suffix (Polar appends /v1/chat/completions
+  # itself). A host-local endpoint (127.0.0.1:...) is fine: the bootstrap
+  # rewrites it so containers reach your host, and says so.
+  #
+  # What the endpoint must satisfy:
+  #   - a tool-call parser (tools arrive as OpenAI tool definitions)
+  #   - a context window >= harness context_window (default 32768)
+  #   - pinned sampling defaults — pi sends NO sampling parameters, so your
+  #     server's generation defaults ARE the sampling policy
+  base_url: http://127.0.0.1:8000
+  # Byte-for-byte the name your server serves (it must appear in
+  # GET <base_url>/v1/models).
+  model: Qwen/Qwen3-0.6B
+
+# ---- optional, defaulted — uncomment only if your endpoint differs ---------
+# The window the harness plans against; must not exceed your endpoint's.
+#context_window: 32768
+# Per-turn generation budget.
+#max_tokens: 8192
+# The served tokenizer's end-of-turn token id. The default (151645,
+# <|im_end|>) is Qwen3's; for another model family, re-derive:
+#   tokenizer.convert_tokens_to_ids("<end-of-turn token>")
+#end_of_turn_token_id: 151645
