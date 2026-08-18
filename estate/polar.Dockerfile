@@ -13,9 +13,14 @@
 #   - git + pyarrow — the corpus pipeline's scaffold/verify clones and the
 #     taskbank's parquet run inside this image, on the estate network.
 #
-# Build (maintainers; strangers pull from GHCR):
-#   docker build -f estate/polar.Dockerfile \
-#     -t ghcr.io/mhganainy/gsj-polar:<polar-sha8>-gsj<lib-version> estate/
+# Build (maintainers; strangers pull from GHCR). MULTI-ARCH is load-bearing:
+# a single-platform build inherits the build host's architecture and dies as
+# `exec format error` on the other one — measured, Apple-Silicon build vs
+# amd64 estate box, CP-34 smoke:
+#   docker buildx build -f estate/polar.Dockerfile \
+#     --platform linux/amd64,linux/arm64 \
+#     --build-arg LIB_REF=v<lib-version> --build-arg LIB_VERSION=<lib-version> \
+#     -t ghcr.io/mhganainy/gsj-polar:<polar-sha8>-gsj<lib-version> --push estate/
 
 FROM docker:28-cli AS dockercli
 

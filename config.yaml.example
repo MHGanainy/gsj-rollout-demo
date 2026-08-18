@@ -13,7 +13,11 @@ corpus: ./corpus-synthetic
 inference:
   # Your endpoint's ROOT — no /v1 suffix (Polar appends /v1/chat/completions
   # itself). A host-local endpoint (127.0.0.1:...) is fine: the bootstrap
-  # rewrites it so containers reach your host, and says so.
+  # rewrites it so containers reach your host, and says so — BUT the
+  # endpoint must then be listening beyond loopback (0.0.0.0, or at least
+  # the docker bridge), because the estate's gateway calls it from a
+  # container. A server bound to 127.0.0.1 only is unreachable from there;
+  # the bootstrap's engine check will tell you.
   #
   # What the endpoint must satisfy:
   #   - a tool-call parser (tools arrive as OpenAI tool definitions)

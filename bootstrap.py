@@ -114,6 +114,11 @@ def check_docker() -> None:
 
 
 def check_library() -> None:
+    import warnings
+    # the packaged-pins UserWarning warns about trace-validation gates; this
+    # estate derives its own pins and sets GSJ_PINS_PATH on every leg that
+    # validates traces, so in the bootstrap's own process it is pure noise
+    warnings.filterwarnings("ignore", message="gsj_rollout.checks")
     try:
         import gsj_rollout  # noqa: F401
     except ImportError:
