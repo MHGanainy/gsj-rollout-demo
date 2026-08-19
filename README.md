@@ -17,27 +17,49 @@ endpoint** how to get an estate — and how to see what the agent did in it.
 A corpus in [the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md),
 a `config.yaml` with your inference endpoint's URL and served-model name,
 and that endpoint itself — that is everything; the bootstrap derives the rest.
+A host-local endpoint (`http://127.0.0.1:…`) is fine: the bootstrap rewrites
+it to `host.docker.internal` for the containers and prints the rewrite — on
+Linux the endpoint must then listen beyond loopback (`config.yaml.example`
+says why).
+
+Words this README leans on: the **estate** is the five demo containers on one
+private docker network; **Polar** is the episode runtime the library vendors —
+one published *image*, run here as three of those containers (the rollout
+server, the gateway, and the receiver);
+**pins** are this estate's approved fingerprints — tokenizer tail, system
+prompt, skill cards — the receiver validates every trace against them; a trace
+is **accepted** (it *qualified*) when it passes those provenance gates, which
+says nothing about task success.
 
 ## Run it
 
 ```bash
 # prerequisites: Docker (with compose v2), Python >= 3.12
+# (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
+#  PEP 668 systems refuse a bare pip install)
 pip install 'gsj-harness-rollout-server>=0.1.2'
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example — or bring your corpus
-cp config.yaml.example config.yaml   # then fill in the three values
+cp config.yaml.example config.yaml   # then fill in the three values:
+                                     # corpus, inference.base_url, inference.model
 
 ./bootstrap.py validate           # check the corpus before anything runs
 ./bootstrap.py up                 # the estate
 ```
+
+**Apple Silicon / ARM**: two of the four images (`gsj-mcp-service`,
+`gsj-pi-harness`) publish `linux/amd64` only. The bootstrap detects an ARM
+host, pulls them explicitly for emulation, and says so — the first MCP embed
+runs ~2 min under emulation (measured); episode speed is unaffected, since
+the agent talks to your endpoint over HTTP.
 
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → stand up **Forgejo** → **scaffold**
 the corpus into per-case repos → stand up the **MCP retrieval service** and
 **ingest** → build the **taskbank** → **verify** everything round-trip →
 derive **this estate's pins** → stand up **Polar** (rollout server, gateway,
-receiver — [as one published container](docs/ADR-0001-polar-as-a-container.md))
+receiver — [as one published image](docs/ADR-0001-polar-as-a-container.md))
 → print what is running, where, and how to stop it.
 
 Running `up` twice is safe — every step detects existing state and says so.
@@ -45,7 +67,9 @@ Running `up` twice is safe — every step detects existing state and says so.
 
 The estate is five services on the private `gsj-demo-net` docker network
 (**no host ports** — to talk to it, join the network, as every command below
-does). Everything it generates or archives lives under `work/`.
+does). Everything it generates or archives lives under `work/` — except the
+taskbank (`taskbank.parquet` + `corpus.lock.json`), which is written beside
+your corpus because it is derived from your corpus and belongs with it.
 
 ## Walkthrough: an episode, submitted and read
 
@@ -68,8 +92,27 @@ id) and names each mismatch **with its consequence** — so you learn your
 tokenizer differs from a preflight row, not from a quarantined episode. What
 an API cannot see (your sampling defaults) it says so, once, out loud.
 
+For comparison, the reference stack's serve argv — the endpoint every number
+in this README was measured against:
+
+```bash
+vllm serve Qwen/Qwen3-0.6B --max-model-len 32768 \
+  --enable-auto-tool-choice --tool-call-parser hermes \
+  --reasoning-parser qwen3 \
+  --default-chat-template-kwargs '{"enable_thinking": false}' \
+  --chat-template qwen3_training.jinja \
+  --generation-config <dir holding the snapshot's generation_config.json>
+```
+
+The last two flags are load-bearing: the symmetric chat template
+([TRL's `qwen3_training.jinja`](https://github.com/huggingface/trl/blob/main/trl/chat_templates/qwen3_training.jinja))
+is why multi-turn episodes reconstruct as ONE chain, and the pinned
+generation config IS your sampling policy — pi sends no sampling parameters.
+
 **1 — submit one episode** (the `up` printout's one-liner; row 0 of the
-taskbank the bootstrap built from your corpus):
+taskbank the bootstrap built from your corpus — the `up` printout's taskbank
+line says how many rows yours produced; the synthetic corpus makes 4,
+0-based):
 
 ```bash
 docker run --rm --network gsj-demo-net \
@@ -131,7 +174,9 @@ The estate runs thinking-off by default. To run thinking-on:
 
 ```yaml
 # config.yaml
-thinking: medium        # the conventional ON; a bare `on` is a YAML boolean
+thinking: medium        # the conventional ON; a bare `on` is a YAML boolean.
+                        # pi's levels: off|minimal|low|medium|high|xhigh|max —
+                        # every non-off level is wire-equivalent here
 ```
 
 then `./bootstrap.py up` again — pins re-derive for the mode (the receiver's
@@ -158,8 +203,15 @@ second before it costs an episode).
 ## Expectations, measured (reference stack, the two-case synthetic corpus)
 
 - `up`, cold on an empty docker host: **~2.5 min** (mostly image pulls +
-  first MCP embed); warm re-run: **~10 s**. Disk: **~3.5 GB** of images.
-- One episode end-to-end: **25–50 s** against a host-local 0.6B engine.
+  first MCP embed; CP-36 measured the pieces cold — the 4.25 GB mcp pull
+  in 18 s on a fast pipe, the first embed ~2 min under ARM emulation
+  (native amd64 is faster) — no single cold run completed uninterrupted
+  there, the ARM wall above split it); warm re-run: **~10 s**; after
+  `down`: ~40 s. Disk: **6–7 GB** of images (measured 6.3 GB on the CP-36
+  run's variants; the pull transfers less; an earlier README said 3.5 GB —
+  that was the compressed estimate, not disk).
+- One episode end-to-end: **25–50 s** against a host-local 0.6B engine
+  (measured again at CP-36: 22.5 s off, 38.6 s thinking-on).
 - Qualification: expect near-total on the reference stack (the library's
   CP-32 measured 72/72; this demo's smoke 1/1). An empty quarantine is
   normal, not suspicious.

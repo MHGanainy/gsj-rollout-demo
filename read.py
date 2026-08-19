@@ -69,8 +69,8 @@ def resolve(directory: Path, ident: str) -> dict:
     entries = all_entries(directory)
     if not entries:
         die(f"no archived episodes under {directory} (or its quarantine/).",
-            "submit one first — the README's `Submit an episode` section is "
-            "the walkthrough; or point --dir at the archive "
+            "submit one first — the README walkthrough's `submit one episode` "
+            "step shows how; or point --dir at the archive "
             "(the receiver writes work/traces/ on the estate host)")
     if ident == "latest":
         return entries[-1]
@@ -98,7 +98,9 @@ def load(entry: dict) -> tuple:
             "corrupted after landing — restore it or delete it")
     if isinstance(body, dict) and set(body) == {"findings", "session_result"}:
         entry["quarantined"] = True
-        return body["findings"], body["session_result"]
+        entry["wrapped"] = True         # the FILE's root is the wrapper —
+        return body["findings"], body["session_result"]  # pointers must say so
+    entry["wrapped"] = False
     return [], body
 
 
@@ -427,6 +429,14 @@ def header_lines(entry, findings, sr, trace) -> list:
                          "is the trainer's call.")
         else:
             lines.append(f"finish      {fin}")
+        # F-63 (CP-36): both stranger readers parsed `status COMPLETED` +
+        # `accepted` as task success until the footer — the outcome belongs
+        # in the header, beside the fields it corrects.
+        d = find_deliverable(trace)
+        lines.append("deliverable "
+                     + (f"written -> {d[0]} (turn {d[2]})" if d else
+                        "NONE — no `write` call this session (acceptance "
+                        "checks provenance, not task success)"))
         sysmsg = next((m for m in trace.get("prompt_messages") or []
                        if m.get("role") == "system"), None)
         if sysmsg:
@@ -456,7 +466,7 @@ def cmd_ls(args) -> None:
     entries = all_entries(directory)
     if not entries:
         die(f"nothing archived under {directory} (or its quarantine/).",
-            "submit an episode first (README, `Submit an episode`), or point "
+            "submit an episode first (the README walkthrough's `submit one episode` step), or point "
             "--dir at a traces directory")
     rows = [(e, *load(e)) for e in entries]
     rejected = sum(1 for _, findings, _ in rows if findings)
@@ -518,8 +528,19 @@ def cmd_show(args) -> None:
         print(f"({path}, written at turn {turn_no})\n")
         print(content.rstrip())
     else:
+        # F-66 (CP-36): only skill rows ask for out/<task_id>.md; a free-form
+        # row's prompt asked for whatever it asked for — say which this was,
+        # and never assert "free-form" when the body names no source at all.
+        src = (sr.get("metadata") or {}).get("prompt_source")
+        if isinstance(src, str) and src.startswith("skill:"):
+            asks = "The skill asks for out/<task_id>.md; "
+        elif isinstance(src, str) and src:
+            asks = "This row's prompt is free-form (no skill card names a file); "
+        else:
+            asks = ("this body names no prompt source, so no expected "
+                    "output file is known; ")
         print("NO deliverable was written — no `write` call happened in this "
-              "session.\n(The skill asks for out/<task_id>.md; a session can "
+              f"session.\n({asks}a session can "
               "qualify without one — qualification checks provenance, not "
               "task success.)")
     if trace.get("finish_reason") == "length":
@@ -538,6 +559,10 @@ def cmd_export(args) -> None:
         "format": "gsj-demo-episode-export/1",
         "archive": {
             "path": str(entry["path"]),
+            "file": entry["path"].name,
+            # F-64 (CP-36): a consumer fetching the referenced arrays can now
+            # verify it read the same bytes this export projected.
+            "sha256": hashlib.sha256(entry["path"].read_bytes()).hexdigest(),
             "disposition": "quarantined" if findings or entry["quarantined"]
                            else "accepted",
             "pins_mode": entry["mode"],
@@ -588,10 +613,16 @@ def cmd_export(args) -> None:
             "token_span": list(runs[k]) if k < len(runs) else None,
         })
     ws = (trace.get("metadata") or {}).get("gsj_workspace") or {}
+    deliverable = find_deliverable(trace)
     out.update({
         "workspace": ws or None,
         "finish_reason": trace.get("finish_reason"),
         "reward": trace.get("reward"),
+        # F-63 (CP-36): the outcome, first-class — a consumer filtering on
+        # disposition alone would ingest well-formed failures unknowingly.
+        "deliverable": ({"written": True, "path": deliverable[0],
+                         "turn": deliverable[2]} if deliverable
+                        else {"written": False}),
         "counts": {
             "prompt_tokens": len(trace.get("prompt_ids") or []),
             "response_tokens": len(ids),
@@ -615,14 +646,34 @@ def cmd_export(args) -> None:
                  and isinstance(md.get("timestep"), int)
                  and p > md["timestep"]}) or [],
         },
+        # F-65 (CP-36): the export reader had to reverse-engineer these three
+        # conventions from arithmetic — state them where the numbers are.
+        # (A quarantined FILE's root is the {findings, session_result} wrapper,
+        # so the in-file path differs per disposition — arrays_root says which.)
+        "conventions": {
+            "token_span": "[start, end) offsets into the archived trace's "
+                          "response_ids (arrays.where names the in-file "
+                          "path), half-open",
+            "loss_mask": "same length as response_ids; 1 = sampled "
+                         "(trainable) token, 0 = context/tool/glue",
+            "response_logprobs": "aligned to response_ids; 0.0 at every "
+                                 "loss_mask==0 position, real at loss_mask==1",
+        },
         "turns": turns,
         "arrays": (
             {k: trace.get(k) for k in
              ("prompt_ids", "response_ids", "loss_mask", "response_logprobs")}
             if args.arrays else
+            # F-64 (CP-36): the pointer names archive.file (portable), not an
+            # absolute path from one host's disk; archive.path/sha256 above
+            # locate and verify the body. Quarantined files are wrapped, so
+            # the root segment is disposition-dependent.
             {"included": False,
-             "where": f"{entry['path']} -> trajectory.traces[0]."
-                      "{prompt_ids,response_ids,loss_mask,response_logprobs}",
+             "where": f"archive.file ({entry['path'].name}) -> "
+                      + ("session_result.trajectory.traces[0]."
+                         if entry.get("wrapped") else
+                         "trajectory.traces[0].")
+                      + "{prompt_ids,response_ids,loss_mask,response_logprobs}",
              "why": "the arrays are ~95% of the body's bytes and the archive "
                     "already holds them verbatim; --arrays embeds them"}),
     })

@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import secrets
 import shutil
@@ -430,13 +431,52 @@ def write_mcp_config(ids: list) -> None:
     say(f"mcp — config generated for {len(ids)} case repo(s): {', '.join(ids)}")
 
 
+def daemon_arch() -> str:
+    """The DAEMON's architecture — the one that picks pull platforms. The
+    client python's platform.machine() lies in two real shapes (a Rosetta
+    x86_64 python on an Apple Silicon Mac; Windows-on-ARM reporting 'ARM64'
+    uppercase) and says nothing about a remote DOCKER_HOST; ask docker, fall
+    back to the interpreter only if the daemon is unreachable."""
+    proc = run(["docker", "version", "--format", "{{.Server.Arch}}"],
+               capture_output=True)
+    arch = proc.stdout.strip() if proc.returncode == 0 and proc.stdout else ""
+    return arch or platform.machine().lower()
+
+
+def ensure_amd64_image(image: str) -> bool:
+    """F-54 (CP-36): two of the published images carry linux/amd64 only, and
+    an ARM docker REFUSES a manifest list with no matching platform instead
+    of falling back to emulation — `up` dies at the pull on every Apple
+    Silicon box. Cure it here: pull the amd64 variant explicitly (local
+    images are used as-is; Docker Desktop runs them under emulation —
+    measured on the CP-36 stranger run: first MCP embed ~2 min emulated,
+    episodes unaffected since they talk to your endpoint over HTTP).
+    Returns True when it pulled the image in this call."""
+    if daemon_arch() not in ("arm64", "aarch64"):
+        return False
+    if run(["docker", "image", "inspect", image],
+           capture_output=True).returncode == 0:
+        return False
+    say(f"arm64 — {image} publishes linux/amd64 only; pulling it explicitly "
+        "for emulation (first start is slower; rollout speed is unaffected)")
+    if run(["docker", "pull", "--platform", "linux/amd64", image]).returncode != 0:
+        die(f"could not pull {image} (linux/amd64) on this ARM host.",
+            "if this host cannot reach ghcr.io, load the image out-of-band "
+            "(docker save/load or skopeo) and re-run — local images are "
+            "used as-is")
+    return True
+
+
 def mcp_up_wait() -> None:
     say("mcp — docker compose up (first start clones and embeds; later starts "
         "reuse the index via fingerprint)")
+    ensure_amd64_image(MCP_IMAGE)
     if run(compose_cmd("up", "-d", "mcp")).returncode != 0:
         die("`docker compose up mcp` failed.",
             f"the compose error above is authoritative; if the pull failed, load {MCP_IMAGE} "
-            "out-of-band and re-run")
+            "out-of-band and re-run — and a `no matching manifest for "
+            "linux/arm64` error means this image has no ARM variant: "
+            f"docker pull --platform linux/amd64 {MCP_IMAGE}")
     code = (
         "import httpx,sys,time\n"
         "deadline=time.time()+900; last=''\n"
@@ -579,6 +619,9 @@ def render_topology() -> None:
 # --------------------------------------------------------------------- polar
 
 def ensure_sandbox_image() -> None:
+    if ensure_amd64_image(SANDBOX_IMAGE):   # F-54: amd64-only publish, ARM
+        say(f"sandbox — {SANDBOX_IMAGE} pulled (amd64) — episodes run in it")
+        return
     if run(["docker", "image", "inspect", SANDBOX_IMAGE],
            capture_output=True).returncode == 0:
         say(f"sandbox — {SANDBOX_IMAGE} already present")
@@ -588,7 +631,10 @@ def ensure_sandbox_image() -> None:
     if run(["docker", "pull", SANDBOX_IMAGE]).returncode != 0:
         die(f"could not pull {SANDBOX_IMAGE}.",
             "if this host cannot reach ghcr.io, load the image out-of-band "
-            "(docker save/load or skopeo) and re-run — local images are used as-is")
+            "(docker save/load or skopeo) and re-run — local images are used "
+            "as-is; a `no matching manifest for linux/arm64` error means "
+            "this image has no ARM variant: docker pull --platform "
+            f"linux/amd64 {SANDBOX_IMAGE}")
 
 
 def estate_digest() -> str:
