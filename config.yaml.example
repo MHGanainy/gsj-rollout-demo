@@ -35,9 +35,21 @@ inference:
 # Per-turn generation budget.
 #max_tokens: 8192
 # The served tokenizer's end-of-turn token id. The default (151645,
-# <|im_end|>) is Qwen3's; for another model family, re-derive:
-#   tokenizer.convert_tokens_to_ids("<end-of-turn token>")
+# <|im_end|>) is Qwen3's. For any other inference.model the bootstrap
+# DERIVES this from your endpoint's own template render at `up` (needs
+# vLLM's /tokenize + /detokenize; on an engine without them the default
+# silently stands and THIS key is the cure — docs/MODEL-SURFACE.md has
+# the from-snapshot recipe). Set it explicitly only to override, and know
+# the explicit value wins (./preflight.py's end-of-turn row checks
+# whichever is in effect).
 #end_of_turn_token_id: 151645
+# The glue stitch, for a chat template that rewrites history by a CONSTANT
+# span (./preflight.py's template row measures this and prints the exact
+# list when it applies — do not guess it). Reconstruction re-inserts these
+# ids at each turn opening. Leave unset on the reference stack: the
+# symmetric template needs no stitch (what changes with the model:
+# docs/MODEL-SURFACE.md).
+#generation_prompt_glue_ids: [151667, 271, 151668, 271]
 # Thinking mode. Off by default. `medium` is the conventional ON (every
 # non-off pi level is wire-equivalent under qwen-chat-template); a bare
 # `on` is a YAML boolean and is rejected by name. Switching modes is a

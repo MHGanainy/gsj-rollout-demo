@@ -88,9 +88,12 @@ break *different* things — no tool-call parser, another tokenizer, unpinned
 sampling, a smaller context window. The preflight probes what an API can
 reach (reachability, the served name, the context window, the tool parser,
 the served tokenizer against this estate's pinned tail ids, the end-of-turn
-id) and names each mismatch **with its consequence** — so you learn your
-tokenizer differs from a preflight row, not from a quarantined episode. What
-an API cannot see (your sampling defaults) it says so, once, out loud.
+id, and whether your chat template **rewrites history** across turns — the
+one failure you would otherwise learn only from G7 quarantines after the
+episodes are already spent) and names each mismatch **with its
+consequence** — so you learn your tokenizer differs from a preflight row,
+not from a quarantined episode. What an API cannot see (your sampling
+defaults) it says so, once, out loud.
 
 For comparison, the reference stack's serve argv — the endpoint every number
 in this README was measured against:
@@ -197,8 +200,10 @@ exactly which gate failed and kept the full body as evidence.
 
 The classic first quarantine is `G6:prompt_suffix_ne_tail_ids` — a
 thinking-mode mismatch between the submit leg and the estate's pins, or a
-non-Qwen tokenizer (the preflight's `tokenizer tail` row warns about the
-second before it costs an episode).
+non-Qwen model whose pins never got derived because the endpoint was down
+at `up` time (the bootstrap derives them from the endpoint's own template
+render; re-run `./bootstrap.py up` with the endpoint live, and the
+preflight's `tokenizer tail` row verifies before an episode is spent).
 
 ## Expectations, measured (reference stack, the two-case synthetic corpus)
 
@@ -223,6 +228,24 @@ second before it costs an episode).
   the transcript collapses the repetition and says NO deliverable was
   written). A 0.6B agent is the demo's floor, honestly rendered, not its
   recommendation.
+
+## Bring your own model
+
+The estate does not require Qwen. When `inference.model` is not the
+reference, `up` derives the tokenizer-bound pins from your endpoint's own
+template render — the G6 tail and the end-of-turn id, over vLLM's
+`/tokenize` + `/detokenize` — and names, out loud, what it cannot derive
+(G4's byte hashes; your sampling defaults). The preflight then verifies
+the derived values and measures the one property nothing checks *before*
+episodes are spent: whether your chat template re-renders history exactly
+(if it does not, every multi-turn episode reconstructs as disconnected
+chains and quarantines at G7 — the `template` row is where you learn that
+before it costs you). The whole surface, item by item — what
+changes with the model, who derives it, what breaks when it is wrong —
+is [docs/MODEL-SURFACE.md](docs/MODEL-SURFACE.md). Honest status: the
+derivation reproduces the reference estate's pins exactly and a
+Llama-3.1 tokenizer derives sane values, but no non-Qwen model has run
+an episode through this estate yet.
 
 ## Bring your own corpus
 

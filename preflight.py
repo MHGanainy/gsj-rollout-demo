@@ -7,7 +7,8 @@ assumes, BEFORE an episode is spent learning it the hard way.
 The demo's smoke ran against the reference stack (vLLM, Qwen/Qwen3-0.6B,
 pinned sampling). A stranger's endpoint differs in ways that break different
 things: no tool-call parser, unpinned sampling defaults, another tokenizer,
-a smaller context window. Most of that cannot be FIXED here — it is your
+a history-rewriting chat template, a smaller context window. Most of that
+cannot be FIXED here — it is your
 serving stack's provenance — but it can be made legible: each probe below
 names what it found, what the demo assumes, and what the mismatch costs.
 
@@ -90,7 +91,31 @@ def main() -> int:
               file=sys.stderr)
         return 1
     window = int(cfg.get("context_window", 32768))
+    thinking = str(cfg.get("thinking", "off"))
+    # the end-of-turn id episodes ACTUALLY run with: the generated
+    # rollout.yaml (which carries the bootstrap-derived value for a
+    # non-reference model) beats config.yaml's key, beats the Qwen default
     eot = int(cfg.get("end_of_turn_token_id", 151645))
+    eot_src = ("config.yaml end_of_turn_token_id" if "end_of_turn_token_id"
+               in cfg else "the reference default (151645, Qwen's <|im_end|>)")
+    armed_glue = cfg.get("generation_prompt_glue_ids")
+    rollout_yaml = HERE / "work" / "estate" / "rollout.yaml"
+    if rollout_yaml.is_file():
+        # generated file — a corrupt or hand-edited one must degrade to the
+        # defaults, never crash a diagnostic
+        try:
+            loaded = yaml.safe_load(rollout_yaml.read_text())
+            builder = (loaded or {}).get("builder") or {}
+            if "end_of_turn_token_id" in builder:
+                eot = int(builder["end_of_turn_token_id"])
+                eot_src = "work/estate/rollout.yaml (what episodes run with)"
+            if "generation_prompt_glue_ids" in builder:
+                armed_glue = builder["generation_prompt_glue_ids"]
+        except (yaml.YAMLError, AttributeError, TypeError, ValueError):
+            pass
+    # the same derivation the bootstrap runs at `up` — imported, not
+    # duplicated, so this preflight verifies the logic episodes got
+    from bootstrap import derive_endpoint_pins
 
     print(f"probing {base} for {model!r} (host-side, as written in "
           f"{cfg_path.name})\n")
@@ -216,12 +241,24 @@ def main() -> int:
     # 5 — the served tokenizer, against THIS estate's pinned tail (vLLM's
     #     /tokenize makes this a real check; elsewhere it is honestly a gap)
     pins_path = Path(args.pins)
+    pins = None
     if not pins_path.is_file():
         row(SKIP, "tokenizer tail",
             f"no derived pins at {pins_path} — run ./bootstrap.py up first "
             "(pins are derived there), then re-run this preflight.")
     else:
-        pins = json.loads(pins_path.read_text()).get("pins", {})
+        try:
+            pins = json.loads(pins_path.read_text()).get("pins", {})
+            if not isinstance(pins, dict):
+                raise ValueError("pins is not a mapping")
+        except (json.JSONDecodeError, AttributeError, ValueError, OSError) as exc:
+            pins = None
+            row(FAIL, "tokenizer tail",
+                f"{pins_path} is unreadable ({exc}) — likely an interrupted "
+                "./bootstrap.py up.\n"
+                "what to do: re-run ./bootstrap.py up to regenerate it, then "
+                "re-run this preflight.")
+    if pins_path.is_file() and pins is not None:
         tail_text = (pins.get("g6_expected_tail") or [None])[0]
         tail_id_set = pins.get("g6_expected_tail_ids") or []
         tail_ids = tail_id_set[0] if tail_id_set else None
@@ -247,29 +284,113 @@ def main() -> int:
                 "consequence: EVERY episode will be quarantined at "
                 "G6:prompt_suffix_ne_tail_ids — the tokenizer/chat-template "
                 "is not the one the pins were derived from.\n"
-                "what to do: serve the reference tokenizer (Qwen3), or "
-                "re-derive the tokenizer-bound pins for yours — the "
-                "library's pins walk (docs/checks-spec.md); this is the "
-                "demo's known seam.")
-        # the end-of-turn id splits turns during reconstruction
-        status, tok = http(f"{base}/tokenize",
-                           {"model": model, "prompt": "<|im_end|>",
-                            "add_special_tokens": False}, timeout=10)
-        if isinstance(status, int) and status < 400 and isinstance(tok, dict):
-            if tok.get("tokens") == [eot]:
-                row(OK, "end-of-turn id",
-                    f"'<|im_end|>' -> [{eot}] — matches the builder's pin")
-            else:
-                row(FAIL, "end-of-turn id",
-                    f"'<|im_end|>' tokenizes to {tok.get('tokens')}, but the "
-                    f"builder splits turns at [{eot}].\n"
-                    "consequence: reconstruction mis-splits every multi-turn "
-                    "episode (G7 territory), or the tail check fires first.\n"
-                    "what to do: set end_of_turn_token_id in config.yaml to "
-                    "your tokenizer's actual end-of-turn id and re-run "
-                    "./bootstrap.py up.")
+                "what to do: re-run ./bootstrap.py up with the endpoint live "
+                "— it derives the tokenizer-bound pins from the endpoint's "
+                "own template render — or derive from a local snapshot per "
+                "docs/MODEL-SURFACE.md.")
+    # 6 — the turn terminator, derived from the served template itself (the
+    #     bootstrap runs the same derivation at `up`; this row verifies the
+    #     value episodes actually run with against a fresh derivation)
+    derived = derive_endpoint_pins(base, model, thinking)
+    if derived["why"] is not None:
+        row(WARN, "end-of-turn id",
+            f"cannot be derived over this API — {derived['why']}.\n"
+            f"the builder will split turns at [{eot}] (from {eot_src}).\n"
+            "consequence if that id is not your tokenizer's turn terminator: "
+            "reconstruction mis-splits every multi-turn episode.\n"
+            "what to do: set end_of_turn_token_id in config.yaml from your "
+            "tokenizer (docs/MODEL-SURFACE.md has the recipe) and re-run "
+            "./bootstrap.py up.")
+    elif derived["eot_id"] == eot:
+        row(OK, "end-of-turn id",
+            f"the served template terminates assistant turns with "
+            f"[{eot}] ({derived['eot_text']!r}) — matches {eot_src}")
+    else:
+        row(FAIL, "end-of-turn id",
+            f"the served template terminates assistant turns with "
+            f"[{derived['eot_id']}] ({derived['eot_text']!r}), but the builder "
+            f"splits turns at [{eot}] (from {eot_src}).\n"
+            "consequence: reconstruction mis-splits every multi-turn episode.\n"
+            "what to do: re-run ./bootstrap.py up after deleting any stale "
+            "end_of_turn_token_id from config.yaml (it derives this id from "
+            "the endpoint when inference.model is not the reference, and an "
+            "explicit value beats the derivation) — or set "
+            f"end_of_turn_token_id: {derived['eot_id']} in config.yaml, then "
+            "re-run ./bootstrap.py up so rollout.yaml is regenerated.")
 
-    # 6 — sampling defaults: honestly not probeable
+    # 7 — the template's prefix-extension property: does turn 2's prompt
+    #     render EXTEND turn 1's, or does the template rewrite history?
+    #     A rewriting template quarantines every multi-turn episode at
+    #     G7:chains_total_ne_1 — AFTER each episode is spent. This row is
+    #     where you learn it before spending any.
+    def tok_msgs(msgs, agp):
+        status, body = http(f"{base}/tokenize",
+                            {"model": model, "messages": msgs,
+                             "add_generation_prompt": agp,
+                             "chat_template_kwargs":
+                                 {"enable_thinking": thinking != "off"}},
+                            timeout=15)
+        if isinstance(status, int) and status < 400 and isinstance(body, dict):
+            return body.get("tokens")
+        return None
+
+    def detok(ids):
+        status, body = http(f"{base}/detokenize",
+                            {"model": model, "tokens": ids}, timeout=10)
+        if isinstance(status, int) and status < 400 and isinstance(body, dict):
+            return body.get("prompt")
+        return None
+
+    from bootstrap import _PROBE_H1, _PROBE_H2
+    p1 = tok_msgs(_PROBE_H1, True)
+    p2 = tok_msgs(_PROBE_H2, True)
+    if p1 is None or p2 is None:
+        row(WARN, "template",
+            "prefix-extension cannot be checked over this API (POST /tokenize "
+            "with messages is not available — not vLLM?).\n"
+            "consequence if the template rewrites history: every multi-turn "
+            "episode reconstructs as DISCONNECTED chains and is quarantined "
+            "at G7:chains_total_ne_1 — after each episode is spent.\n"
+            "what to do: run the local-snapshot prefix-extension recipe in "
+            "docs/MODEL-SURFACE.md before spending episodes.")
+    elif p2[:len(p1)] == p1:
+        row(OK, "template",
+            f"turn 2's prompt render strictly extends turn 1's "
+            f"({len(p1)} -> {len(p2)} ids) — multi-turn episodes reconstruct "
+            "as one chain")
+    else:
+        i = next((k for k in range(min(len(p1), len(p2))) if p1[k] != p2[k]),
+                 min(len(p1), len(p2)))   # truncating render: diverges at its end
+        lost = p1[i:]
+        if armed_glue and lost == armed_glue:
+            row(OK, "template",
+                f"turn 2's render rewrites turn 1's by exactly the armed "
+                f"glue span {armed_glue} — the library's stitch re-inserts "
+                "it at reconstruction (ADR-0007), so episodes reconstruct "
+                "as one chain")
+        else:
+            row(FAIL, "template",
+                f"turn 2's render REWRITES turn 1's — diverges at index {i} of "
+                f"{len(p1)}:\n"
+                f"turn 1 from {i}: {lost} = {detok(lost)!r}\n"
+                f"turn 2 there:   {p2[i:i + 8]} = {detok(p2[i:i + 8])!r}\n"
+                "consequence: every multi-turn episode reconstructs as "
+                "DISCONNECTED chains and is quarantined at "
+                "G7:chains_total_ne_1 — after each episode is spent, and "
+                "with the cross-turn context already lost.\n"
+                "what to do, in order of preference:\n"
+                "- Qwen3 family: serve TRL's qwen3_training.jinja via "
+                "--chat-template (the README's reference serve argv) — measured "
+                "curing exactly this divergence.\n"
+                "- other families: if the lost span above is the SAME few ids at "
+                f"every turn, set generation_prompt_glue_ids: {lost} in "
+                "config.yaml and re-run ./bootstrap.py up — the library's glue "
+                "stitch re-inserts it at reconstruction (ADR-0007 in the "
+                "library).\n"
+                "- neither fits: this model's template needs a symmetric variant "
+                "before episodes are worth spending (docs/MODEL-SURFACE.md).")
+
+    # 8 — sampling defaults: honestly not probeable
     row(WARN, "sampling defaults",
         "NOT PROBEABLE over the API. pi sends NO sampling parameters, so "
         "your server's generation defaults ARE the sampling policy.\n"

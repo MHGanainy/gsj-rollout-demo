@@ -49,6 +49,7 @@ MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.3.0"
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"
 LIB_MIN = (0, 1, 2)          # first wheel that ships the corpus pipeline
 NETWORK = "gsj-demo-net"
+REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the estate's fixed in-network facts (derived, never the stranger's) ----
 OWNER = "gsj-staging"        # the pipeline's staging owner (contract)
@@ -142,7 +143,7 @@ def load_demo_config(path: Path) -> dict:
     except yaml.YAMLError as exc:
         die(f"{path} is not valid YAML: {exc}", "fix the syntax and re-run")
     allowed = {"corpus", "inference", "context_window", "max_tokens",
-               "end_of_turn_token_id", "thinking"}
+               "end_of_turn_token_id", "thinking", "generation_prompt_glue_ids"}
     unknown = set(raw) - allowed
     if unknown:
         die(f"{path}: unknown key(s) {sorted(unknown)}.",
@@ -159,6 +160,20 @@ def load_demo_config(path: Path) -> dict:
     if bad:
         die(f"{path}: inference: unknown key(s) {sorted(bad)}.",
             "inference takes exactly base_url and model")
+    for key in ("context_window", "max_tokens", "end_of_turn_token_id"):
+        if key in raw and (isinstance(raw[key], bool)
+                           or not isinstance(raw[key], int)):
+            die(f"{path}: {key} must be an integer, got {raw[key]!r}.",
+                f"e.g. {key}: 32768 — see config.yaml.example")
+    if "generation_prompt_glue_ids" in raw:
+        glue = raw["generation_prompt_glue_ids"]
+        if not (isinstance(glue, list) and glue
+                and all(isinstance(t, int) and not isinstance(t, bool)
+                        for t in glue)):
+            die(f"{path}: generation_prompt_glue_ids must be a non-empty "
+                "list of token ids (YAML booleans like `on` are not ids).",
+                "./preflight.py's template row prints the exact list when "
+                "the stitch applies; delete the key if it does not")
     if "thinking" in raw:
         # YAML 1.1: bare off/no/false arrive as boolean False — the library
         # deliberately maps that to "off", so accept it; bare `on` (True) is
@@ -506,7 +521,141 @@ def mcp_up_wait() -> None:
 
 # ---------------------------------------------------------------------- pins
 
-def derive_pins(corpus: Path, model: str, thinking: str) -> None:
+def _endpoint_json(url: str, payload: dict, timeout: float = 15.0):
+    """POST json -> (status|None, parsed|error-string). Never raises."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode(errors="replace"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode(errors="replace")[:200]
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+# The probe history, shaped like the pi wire (system, user,
+# assistant-with-tool-call, tool result). What matters is the template
+# constants AROUND these strings, not the strings.
+_PROBE_H1 = [
+    {"role": "system", "content": "You are a careful assistant working a case file."},
+    {"role": "user", "content": "Summarize the case status. Use the status tool first."},
+]
+_PROBE_H2 = _PROBE_H1 + [
+    {"role": "assistant", "content": "Checking the status now.",
+     "tool_calls": [{"id": "call_0001", "type": "function",
+                     "function": {"name": "case_status",
+                                  "arguments": "{\"case\": \"demo\"}"}}]},
+    {"role": "tool", "tool_call_id": "call_0001",
+     "content": "OPEN since 2024; 3 filings."},
+]
+_PROBE_MARKER = "GSJPROBEMARKERXYZ"
+
+
+def derive_endpoint_pins(base_url: str, model: str, thinking: str) -> dict:
+    """Derive the tokenizer-bound values from the SERVED artifact itself,
+    over vLLM's /tokenize + /detokenize (the only API surface that renders
+    the actual served chat template). Returns a dict with either every
+    derived value or a `why` naming exactly what could not be derived —
+    a value that cannot be derived is named, never defaulted (the CP-19
+    packaged-pins rule; these feed gates).
+
+      tail_ids/tail_text  what the template appends for a new assistant
+                          turn (add_generation_prompt delta) — G6's subject
+      eot_id/eot_text     the turn terminator: the first non-whitespace
+                          token the template emits after assistant content
+                          (assumption, stated: that token is also the id
+                          the engine stops on — true for every family
+                          measured; verify yours if it is exotic)
+    """
+    base = base_url.rstrip("/")
+
+    def tokenize_messages(msgs, agp):
+        status, body = _endpoint_json(f"{base}/tokenize", {
+            "model": model, "messages": msgs, "add_generation_prompt": agp,
+            "chat_template_kwargs": {"enable_thinking": thinking != "off"}})
+        if (status != 200 or not isinstance(body, dict)
+                or not isinstance(body.get("tokens"), list)):
+            return None, f"POST /tokenize (messages) answered {status}: {body}"
+        return body["tokens"], None
+
+    def detokenize(ids):
+        status, body = _endpoint_json(f"{base}/detokenize",
+                                      {"model": model, "tokens": ids})
+        if (status != 200 or not isinstance(body, dict)
+                or not isinstance(body.get("prompt"), str)):
+            return None, f"POST /detokenize answered {status}: {body}"
+        return body["prompt"], None
+
+    a, why = tokenize_messages(_PROBE_H1, False)
+    if why:
+        return {"why": why + " — this endpoint cannot render its own chat "
+                             "template over the API (not vLLM?)"}
+    b, why = tokenize_messages(_PROBE_H1, True)
+    if why:
+        return {"why": why}
+    if b[:len(a)] != a:
+        return {"why": "the add_generation_prompt render does not extend the "
+                       "plain render — this template's generation prompt is "
+                       "not a suffix, so a G6 tail does not exist for it"}
+    if len(b) == len(a):
+        return {"why": "add_generation_prompt changes nothing — this template "
+                       "ignores it (seen in the wild on simplified mirror "
+                       "templates); no tail exists to pin, and G6 treats an "
+                       "empty tail as fail-closed (every turn would offend), "
+                       "so nothing is written"}
+    tail = b[len(a):]
+    tail_text, why = detokenize(tail)
+    if why:
+        return {"why": why}
+    status, rt = _endpoint_json(f"{base}/tokenize", {
+        "model": model, "prompt": tail_text, "add_special_tokens": False})
+    if status != 200 or not isinstance(rt, dict) or rt.get("tokens") != tail:
+        return {"why": f"the tail's text form does not round-trip "
+                       f"({tail_text!r} -> {rt.get('tokens') if isinstance(rt, dict) else rt}, "
+                       f"expected {tail}) — the ids are sound but the text pin "
+                       "would lie; not writing either"}
+
+    c, why = tokenize_messages(
+        _PROBE_H1 + [{"role": "assistant", "content": _PROBE_MARKER}], False)
+    if why:
+        return {"why": why}
+    if c[:len(a)] != a:
+        return {"why": "an assistant-message render does not extend the "
+                       "history render — cannot isolate the turn terminator"}
+    block = c[len(a):]
+    status, m = _endpoint_json(f"{base}/tokenize", {
+        "model": model, "prompt": _PROBE_MARKER, "add_special_tokens": False})
+    marker = m.get("tokens") if isinstance(m, dict) else None
+    pos = next((k for k in range(len(block) - len(marker or []) + 1)
+                if marker and block[k:k + len(marker)] == marker), None)
+    if pos is None:
+        return {"why": f"the probe marker's ids were not found in the "
+                       f"assistant render ({block}) — cannot isolate the "
+                       "turn terminator"}
+    eot_id = None
+    for tok_id in block[pos + len(marker):]:
+        text, why = detokenize([tok_id])
+        if why:
+            return {"why": why}
+        if text.strip():
+            eot_id, eot_text = tok_id, text
+            break
+    if eot_id is None:
+        return {"why": "no non-whitespace token follows assistant content in "
+                       "this template — cannot derive the turn terminator"}
+    status, models_body = _endpoint_json(f"{base}/tokenize", {
+        "model": model, "prompt": "x", "add_special_tokens": False})
+    max_len = models_body.get("max_model_len") if isinstance(models_body, dict) else None
+    return {"tail_ids": tail, "tail_text": tail_text,
+            "eot_id": eot_id, "eot_text": eot_text,
+            "max_model_len": max_len, "why": None}
+
+
+def derive_pins(corpus: Path, model: str, thinking: str,
+                base_url: str | None = None) -> "int | None":
     from importlib.util import find_spec
     pins_root = Path(find_spec("gsj_rollout").origin).parent / "pins"
     # ADR-0024: a non-off thinking level needs the thinking-on pins on both
@@ -543,6 +692,76 @@ def derive_pins(corpus: Path, model: str, thinking: str) -> None:
     doc["derived_at"] = "gsj-rollout-demo bootstrap (G1 from the corpus's skill cards; " \
                         "G2 by AGENTS.md byte-substitution on the reference capture; " \
                         "all other sets are the reference estate's)"
+
+    derived_eot = None
+    if model != REFERENCE_MODEL and base_url:
+        derived = derive_endpoint_pins(base_url.rstrip("/"), model, thinking)
+        if derived["why"] is None:
+            doc["pins"]["g6_expected_tail"] = [derived["tail_text"]]
+            doc["pins"]["g6_expected_tail_ids"] = [derived["tail_ids"]]
+            # G4's two hashes CANNOT be derived over an API — they are the
+            # bytes of tokenizer.json and of the served template, which no
+            # endpoint exposes. Named, not defaulted (empty approved sets;
+            # no receiver gate reads them — their gate is the estate-side
+            # walk, docs/MODEL-SURFACE.md says how).
+            doc["pins"]["tokenizer_hash"] = []
+            doc["pins"]["chat_template_hash"] = []
+            prov = doc.setdefault("provenance", {})
+            prov["g6_expected_tail"] = {
+                "algo": "verbatim_text",
+                "artifacts": [f"{base_url}/detokenize over the derived tail ids"],
+                "notes": f"Derived by this bootstrap from the SERVED template: the "
+                         f"add_generation_prompt delta of a two-turn probe render, "
+                         f"mode `thinking: {thinking}`. Round-trips through "
+                         f"/tokenize. On a non-Qwen family this pin asserts "
+                         f"TEMPLATE INTEGRITY of every assistant-turn opening — "
+                         f"not thinking-off (that meaning is Qwen-specific)."}
+            prov["g6_expected_tail_ids"] = {
+                "algo": "token_ids",
+                "artifacts": [f"{base_url}/tokenize (messages form) against "
+                              f"{model!r}, chat_template_kwargs enable_thinking="
+                              f"{str(thinking != 'off').lower()}"],
+                "notes": "The generation-prompt suffix under the served "
+                         "template, derived at bootstrap time. G6 compares "
+                         "every assistant-turn opening against exactly this."}
+            for key in ("tokenizer_hash", "chat_template_hash"):
+                prov[key] = {
+                    "algo": prov.get(key, {}).get("algo", ""),
+                    "artifacts": [],
+                    "notes": "EMPTY on purpose: not derivable over the API and "
+                             "the reference estate's value would be a lie for "
+                             f"{model!r}. Derive from a local snapshot "
+                             "(docs/MODEL-SURFACE.md) if you want the "
+                             "estate-side G4 walk."}
+            doc["derived_at"] += (
+                f"; G6 tail + end-of-turn id derived from the endpoint's own "
+                f"template render ({base_url}/tokenize) for {model!r}")
+            derived_eot = derived["eot_id"]
+            say(f"pins — {model!r} is not the reference model; derived from the "
+                f"endpoint's own template render:")
+            say(f"pins —   g6_expected_tail_ids = {derived['tail_ids']}  "
+                f"({derived['tail_text']!r})")
+            say(f"pins —   end_of_turn_token_id = {derived['eot_id']}  "
+                f"({derived['eot_text']!r}) -> rollout.yaml builder")
+            say("pins — NOT derivable and left empty, on purpose: G4's "
+                "tokenizer/chat-template hashes (byte identities no API exposes "
+                "— docs/MODEL-SURFACE.md has the local-snapshot walk). Also "
+                "still yours to own: sampling defaults (engine-side, "
+                "unprobeable) and the template's prefix-extension property — "
+                "./preflight.py probes that one, run it before spending "
+                "episodes.")
+        else:
+            say(f"pins — NOTE: your model is {model!r}, not the reference "
+                f"{REFERENCE_MODEL}, and deriving the tokenizer-bound pins from "
+                f"the endpoint FAILED: {derived['why']}")
+            say("pins — the G6 tail and builder.end_of_turn_token_id remain the "
+                "REFERENCE estate's values, so the first episode will likely be "
+                "quarantined at G6 naming those digests — the gate working, not "
+                "an accident. Cure: bring the endpoint up (vLLM exposes "
+                "/tokenize and /detokenize; those are all the derivation "
+                "needs) and re-run ./bootstrap.py up, or derive from a local "
+                "snapshot per docs/MODEL-SURFACE.md.")
+
     out = ESTATE / "pins.gsj.json"
     out.write_text(json.dumps(doc, indent=2) + "\n")
     say(f"pins — derived for THIS estate at {out}: {len(cards)} skill card(s) approved "
@@ -550,18 +769,12 @@ def derive_pins(corpus: Path, model: str, thinking: str) -> None:
         f"{doc.get('mode', 'thinking-off')} (from config `thinking: {thinking}`)")
     if corpus_agents == ref_agents:
         say("pins — your AGENTS.md is the reference text, so G2 equals the packaged pin")
-    if model != "Qwen/Qwen3-0.6B":
-        say(f"pins — NOTE: your model is {model!r}, not the reference Qwen/Qwen3-0.6B. "
-            "The tokenizer-bound pins (G6's thinking tail; the estate-side G4 walk) and "
-            "builder.end_of_turn_token_id are still the reference estate's — the first "
-            "episode may be rejected naming those digests. That rejection is the design "
-            "working; re-deriving them needs the library's pins walk "
-            "(docs/checks-spec.md) and is this demo's known seam.")
+    return derived_eot
 
 
 # ------------------------------------------------------------ rollout config
 
-def write_rollout_yaml(demo: dict) -> str:
+def write_rollout_yaml(demo: dict, derived_eot: "int | None" = None) -> str:
     base_url = str(demo["inference"]["base_url"]).rstrip("/")
     rewritten = re.sub(r"^(https?://)(localhost|127\.0\.0\.1)(?=[:/]|$)",
                        r"\1host.docker.internal", base_url)
@@ -596,7 +809,30 @@ def write_rollout_yaml(demo: dict) -> str:
     if harness:
         cfg["harness"] = harness
     if "end_of_turn_token_id" in demo:
-        cfg["builder"] = {"end_of_turn_token_id": int(demo["end_of_turn_token_id"])}
+        explicit = int(demo["end_of_turn_token_id"])
+        cfg["builder"] = {"end_of_turn_token_id": explicit}
+        if derived_eot is not None and derived_eot != explicit:
+            say(f"config — WARNING: config.yaml pins end_of_turn_token_id "
+                f"{explicit}, but the endpoint's own template render derives "
+                f"{derived_eot}. The explicit value wins; if it is wrong, "
+                "reconstruction mis-splits every multi-turn episode. Delete "
+                "the key from config.yaml to use the derived value.")
+    elif derived_eot is not None:
+        cfg["builder"] = {"end_of_turn_token_id": int(derived_eot)}
+    if "generation_prompt_glue_ids" in demo:
+        glue = demo["generation_prompt_glue_ids"]
+        if not (isinstance(glue, list) and glue
+                and all(isinstance(t, int) and not isinstance(t, bool)
+                        for t in glue)):
+            die("config.yaml: generation_prompt_glue_ids must be a non-empty "
+                "list of token ids.",
+                "./preflight.py's template row prints the exact list when the "
+                "stitch applies; delete the key if it does not")
+        cfg.setdefault("builder", {})["generation_prompt_glue_ids"] = \
+            [int(t) for t in glue]
+        say(f"config — glue stitch armed: reconstruction re-inserts "
+            f"{glue} at each turn opening (set from config.yaml because "
+            "./preflight.py measured a constant template divergence)")
     text = ("# GENERATED by bootstrap.py from config.yaml — do not edit; edit\n"
             "# config.yaml and re-run ./bootstrap.py up. Schema: the library's\n"
             "# `one YAML` (gsj_rollout/config.py).\n"
@@ -806,9 +1042,10 @@ def cmd_up(args) -> None:
 
     digest_file = ESTATE / DIGEST_FILE_NAME
     served_digest = digest_file.read_text().strip() if digest_file.is_file() else ""
-    derive_pins(corpus, demo["inference"]["model"],
-                str(demo.get("thinking", "off")))
-    engine_container_url = write_rollout_yaml(demo)
+    derived_eot = derive_pins(corpus, demo["inference"]["model"],
+                              str(demo.get("thinking", "off")),
+                              str(demo["inference"]["base_url"]))
+    engine_container_url = write_rollout_yaml(demo, derived_eot)
     render_topology()
     ensure_sandbox_image()
     polar_up(recreate=served_digest != estate_digest())
