@@ -3,12 +3,13 @@
 The external F-series continues here. F-01–F-53 — the trainer-side
 consumer record — live in
 [gsj-harness-rollout-server-examples/FINDINGS.md](https://github.com/MHGanainy/gsj-harness-rollout-server-examples/blob/main/FINDINGS.md);
-this file carries the demo's rows, F-54 onward, minted at library CP-36
-(the first from-nothing stranger test — the library's
+this file carries the demo's rows, F-54 onward — F-54–F-68 minted at
+library CP-36 (the first from-nothing stranger test — the library's
 `docs/reports/CP-36.md` is where each row's full story lives; F-54's
-durable half is still open as library wishlist row 40). **The F-series is ONE register across both consumer
+durable half is still open as library wishlist row 40), F-69 at
+library CP-40 (the audit's orphan pass). **The F-series is ONE register across both consumer
 repos: a new row, minted from either file, takes the next id after the
-highest anywhere. Next fresh id: F-69.** Severity vocabulary here is
+highest anywhere. Next fresh id: F-70.** Severity vocabulary here is
 CP-36's: blocking / costly / cosmetic / wrong shape, pass-tagged.
 `library-side?` marks the half a demo commit cannot cure.
 
@@ -29,3 +30,4 @@ CP-36's: blocking / costly / cosmetic / wrong shape, pass-tagged.
 | F-66 | cosmetic [pass 2/3] | The deliverable footer's "The skill asks for out/&lt;task_id&gt;.md" rendered on free-form rows that asked no such thing (`case_orchard@t2`) | no | FIXED at `96f2329`: conditional on `prompt_source`, with a third branch for bodies that name none |
 | F-67 | wrong shape [pass 5] | The injected "missing prompts.yaml" is not an invalid corpus: contract §4 blesses it (`PASS 4 pages, 0 prompts`; the timestep contributes no tasks — the honest 0-count in the row is the guard) | no | NO FIX — not a defect; recorded so it is not re-filed as a bug |
 | F-68 | cosmetic [pass 5] | read.py messages cited a README section by a nonexistent name | no | FIXED at `96f2329` |
+| F-69 | costly, latent [library CP-40, audit O4 — minted by the three-repo audit, not by a run pass] | The estate depends on anonymous Forgejo read, and no document said so: compose sets `DISABLE_REGISTRATION` but no sign-in requirement, and the bootstrap's per-episode clone URL (`bootstrap.py` `clone_url_for`) embeds no credentials — anonymous read is load-bearing. Nothing is published to host ports, but the sandboxed agent lives on the same compose network by construction (it clones from it): a URL-guessing agent can re-clone `http://forgejo:3000/gsj-staging/<case_id>.git` and read past its timestep cutoff over the network. The in-sandbox git channel is closed (library CP-11: `--depth 1`, no remote, no reflog); this is the network channel — library gap row 2's estate residual, inherited unchanged | **yes** — the cure is estate posture (credentialed clone URLs or sandbox egress policy — library gap row 2); flipping sign-in on alone would break the credential-less clone flow, so the fix is a design, not a flag | OPEN — decided at library CP-40: production-prep, not permanently accepted. Acceptable for a demo whose corpus is synthetic; NOT acceptable for a run someone intends to train from — the first production bring-up owns it (library charter §7 row 2's [CP-40] note is the master record) |
