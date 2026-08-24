@@ -243,9 +243,13 @@ chains and quarantines at G7 — the `template` row is where you learn that
 before it costs you). The whole surface, item by item — what
 changes with the model, who derives it, what breaks when it is wrong —
 is [docs/MODEL-SURFACE.md](docs/MODEL-SURFACE.md). Honest status: the
-derivation reproduces the reference estate's pins exactly and a
-Llama-3.1 tokenizer derives sane values, but no non-Qwen model has run
-an episode through this estate yet.
+first non-Qwen episode ran at CP-38 — Llama-3.1-8B-Instruct, served
+with its own tool parser (`llama3_json`) and its own embedded template,
+derived at `up`, preflighted all-ok, and **accepted: `chains_total: 1`,
+eight completions merged, zero findings**. What the second family
+taught (two turn terminators, the round trip's two halves, malformed
+JSON ending episodes, retrieval-free green) is written where it
+belongs: MODEL-SURFACE's "second family, measured" section.
 
 ## Bring your own corpus
 

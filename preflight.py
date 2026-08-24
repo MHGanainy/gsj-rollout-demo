@@ -213,7 +213,8 @@ def main() -> int:
             "consequence: pi sends 11 tool definitions on every turn; every "
             "episode dies at the first request.\n"
             "what to do: enable your server's tool-calling support (vLLM: "
-            "--enable-auto-tool-choice --tool-call-parser hermes).")
+            "--enable-auto-tool-choice --tool-call-parser <your family's "
+            "parser: hermes for Qwen, llama3_json for Llama-3.1>).")
     else:
         choices = resp.get("choices") if isinstance(resp, dict) else None
         first = choices[0] if isinstance(choices, list) and choices else None
@@ -236,7 +237,9 @@ def main() -> int:
                 "text: episodes loop making zero tool calls and produce "
                 "degenerate trajectories.\n"
                 "what to do: confirm your server parses tool calls (vLLM: "
-                "--enable-auto-tool-choice --tool-call-parser hermes).")
+                "--enable-auto-tool-choice --tool-call-parser <your "
+                "family's parser: hermes for Qwen, llama3_json for "
+                "Llama-3.1>).")
 
     # 5 — the served tokenizer, against THIS estate's pinned tail (vLLM's
     #     /tokenize makes this a real check; elsewhere it is honestly a gap)
