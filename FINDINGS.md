@@ -13,6 +13,31 @@ highest anywhere. Next fresh id: F-70.** Severity vocabulary here is
 CP-36's: blocking / costly / cosmetic / wrong shape, pass-tagged.
 `library-side?` marks the half a demo commit cannot cure.
 
+**[library CP-43 — 2026-08-24] The audit's demo-side remainder closed**
+in this repo's front-door sitting (the library's `docs/reports/CP-43.md`
+is the record): W6 — `bootstrap.py` now empties G4's two hashes for ANY
+non-reference model, derivation success or failure, so MODEL-SURFACE's
+emptied-G4 claim is true unconditionally; W7 — the README draws the
+corpus *source* tree as it is (`timestep-<T>/pages/page_NNNN.md`) and
+names `md/` as the generated repo-side layout; W9's demo half — the
+per-episode band now matches its own CP-36 measurements (~20–40 s);
+C9 — `config.yaml.example` no longer says the eot default "silently
+stands" (the bootstrap is loud about it); C10 — MODEL-SURFACE's
+chat-template row now NAMES the four template-derived rows and excludes
+the tool-parser and context-window rows (naming, not class-counting —
+the context-window row is [endpoint]-classed on vLLM too, so "the four
+[endpoint] rows" would re-embed the off-by-one); C11 — the generated
+`pins.gsj.json` now carries THIS estate's `host`/`walk_status` and G1/G2
+provenance instead of the reference H200's, and its `derived_at` records
+what the run derived, carried, emptied, or FAILED to derive (the
+failure-path artifact no longer claims endpoint-derived G6); M2 — the phantom
+`healthcheck.sh` cite replaced with a self-contained description; and
+S4's four demo texts — `bootstrap.py`'s eot docstring (the render-side
+closer, not the engine's stop id — CP-38's measurement), `read.py`'s G6
+cure (pins derive automatically at `up`, not a manual re-pin),
+`preflight.py`'s "(Qwen3)" tail label, MODEL-SURFACE's one-estate
+opener. No run pass, no new row; **next fresh id stays F-70**.
+
 | # | severity | finding | library-side? | status |
 | --- | --- | --- | --- | --- |
 | F-54 | **blocking (ARM hosts)** [pass 1, honest path] | `gsj-mcp-service:0.3.0` and `gsj-pi-harness:pi0.83.0-3` publish `linux/amd64` only (`gsj-polar` is multi-arch — the estate is asymmetric); an ARM docker REFUSES a manifest list with no matching platform rather than emulating, so `up` died at the mcp pull and, cured, again at the sandbox pull. The sandbox message misdiagnosed ("cannot reach ghcr.io"). What a stranger does: a docker-literate one reconstructs `docker pull --platform linux/amd64`; anyone else stops dead on the demo's headline promise | **yes** — the durable cure is an operator/publishing op: arm64 variants + a multi-arch index under the SAME pinned tags (provenance-sensitive; library wishlist row 40) | demo half FIXED at `96f2329`: bootstrap `ensure_amd64_image` (on ARM, absent → pull amd64 explicitly and say so; measured working — the mcp embed ran 115 s under emulation, episodes unaffected) + README ARM paragraph + truthful messages. Durable half **OPEN** as library wishlist row 40 |

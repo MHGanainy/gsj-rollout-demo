@@ -764,9 +764,11 @@ FINDING_MEANINGS = [
      "tokenizer/chat template is not the one the pins were derived from.",
      "compare config.yaml `thinking:` with the archive stamp on the "
      "filename; if you changed modes, re-run ./bootstrap.py up so pins AND "
-     "the receiver follow. A non-Qwen model needs a tokenizer re-pin — the "
-     "demo's known seam (./preflight.py names the mismatch before an "
-     "episode is spent)."),
+     "the receiver follow. A non-Qwen model's pins derive automatically at "
+     "`up` from the endpoint's own template render — if the endpoint was "
+     "down (or not vLLM) at `up` time the reference values stood; re-run "
+     "./bootstrap.py up with it live (./preflight.py names the mismatch "
+     "before an episode is spent)."),
     ("G7:",
      "reconstruction evidence failed — chain count, truncation, merge "
      "totals, or the engine settings hash is not approved (sampling/engine "

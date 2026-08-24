@@ -272,7 +272,8 @@ def main() -> int:
             row(WARN, "tokenizer tail",
                 f"POST /tokenize is not available here ({status}) — the "
                 "served tokenizer cannot be verified over the API.\n"
-                "consequence if it differs from the pinned one (Qwen3): the "
+                "consequence if it differs from the one the pins were "
+                "derived from: the "
                 "FIRST episode is quarantined at G6:prompt_suffix_ne_tail_ids "
                 "— that quarantine, not this preflight, is where you would "
                 "learn it. `./read.py quarantine` will name it.")

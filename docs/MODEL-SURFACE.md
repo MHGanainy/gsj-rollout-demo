@@ -1,9 +1,13 @@
 # What changes when the model changes
 
-Every measured number in the README — and every packaged pin — came from
-one estate: vLLM serving `Qwen/Qwen3-0.6B` under the symmetric chat
-template, pinned sampling. Point `config.yaml` at your own model and a
-specific, finite set of things move. This page walks all of them: what
+Every packaged pin — and, unless labelled otherwise, every measured
+number in the README — comes from the reference estate: vLLM serving
+`Qwen/Qwen3-0.6B` under the symmetric chat template, pinned sampling.
+(One other family has measured numbers too: Llama-3.1-8B-Instruct, run
+and accepted at CP-38, labelled where its figures appear here and in the
+README — "the second family, measured" below is its record.) Point
+`config.yaml` at your own model and a specific, finite set of things
+move. This page walks all of them: what
 each one is, who derives it now, and what breaks when it is wrong. It is
 written for the moment *before* you spend an episode learning any of it.
 
@@ -21,13 +25,13 @@ How each value is derived — the four classes used below:
 | what | class | who derives it | if it is wrong |
 |---|---|---|---|
 | served model name (`inference.model`) | [you] | you; preflight's `model` row verifies byte-for-byte (any name works, slashed or not — the library prepends its own provider label internally) | every episode dies as ADM1/ADM4 "no completions" |
-| the chat template itself | [estate] | your serve argv (`--chat-template`, or the snapshot's embedded one) — nothing here can choose it *for* you; the four rows below are derived *from* it | the four rows below |
-| the tool-call parser | [estate] | your serve argv — it is family-bound (vLLM: `--tool-call-parser hermes` for Qwen, `llama3_json` for Llama-3.1; vLLM documents one per family); preflight's `tool parser` row probes it, and a real request whose reply carries a STRUCTURED `tool_call` (the parser half of `healthcheck.sh`'s round trip — the answer half is model temperament, see "the second family, measured") is the strong verify | the model's calls stay text: episodes run tool-poor or tool-free and still come back green — the tool-FREE case has a purpose-built gate (`H41:roster_offered_zero_tool_calls`, policy-off by default); the tool-POOR case no gate can see |
+| the chat template itself | [estate] | your serve argv (`--chat-template`, or the snapshot's embedded one) — nothing here can choose it *for* you; the four template-derived rows below (prefix-extension, the G6 tail, `end_of_turn_token_id`, `generation_prompt_glue_ids`) are derived *from* it — the tool-parser and context-window rows are not | the four template-derived rows just named |
+| the tool-call parser | [estate] | your serve argv — it is family-bound (vLLM: `--tool-call-parser hermes` for Qwen, `llama3_json` for Llama-3.1; vLLM documents one per family); preflight's `tool parser` row probes it, and a real request whose reply carries a STRUCTURED `tool_call` (the parser half of a tool round trip; the answer half — whether the model *uses* the result — is temperament, see "the second family, measured") is the strong verify | the model's calls stay text: episodes run tool-poor or tool-free and still come back green — the tool-FREE case has a purpose-built gate (`H41:roster_offered_zero_tool_calls`, policy-off by default); the tool-POOR case no gate can see |
 | prefix-extension property | [endpoint] | preflight's `template` row | multi-turn episodes quarantine at `G7:chains_total_ne_1` — after each is spent (see below) |
 | G6 tail (`g6_expected_tail`, `…_ids`) | [endpoint] | bootstrap, at `up`, when `inference.model` is not the reference | every episode quarantined at `G6:prompt_suffix_ne_tail_ids` |
 | `end_of_turn_token_id` | [endpoint] | bootstrap, at `up` (into the generated rollout.yaml); preflight's `end-of-turn id` row verifies | reconstruction mis-splits every multi-turn episode |
 | `generation_prompt_glue_ids` | [endpoint], only when needed | preflight's `template` row prints the candidate list on a constant divergence; you set it in config.yaml | only relevant when the template rewrites history by a constant span |
-| G4 hashes (`tokenizer_hash`, `chat_template_hash`) | [snapshot] | nobody, over an API — the bootstrap writes them **empty** for a non-reference model; recipe below | nothing, at the receiver, today: no trace-side gate reads them. What you lose is the estate-side drift walk they exist for |
+| G4 hashes (`tokenizer_hash`, `chat_template_hash`) | [snapshot] | nobody, over an API — the bootstrap writes them **empty** for any non-reference model, derivation success or failure (the reference's values would be a lie for your model either way); recipe below | nothing, at the receiver, today: no trace-side gate reads them. What you lose is the estate-side drift walk they exist for |
 | context window | [endpoint] on vLLM, else [you] | preflight's `context window` row; `context_window` in config.yaml | mid-episode 400s once the real window fills |
 | sampling defaults | [you] / [estate] | nobody — pi sends NO sampling parameters, and no API states server defaults | you train on whatever distribution the server happens to default to (unpinned vLLM: T=1.0) |
 | `thinking` mode | [you] | config.yaml; pins re-derive per mode at `up` | see "thinking on a family without the mode" below |
@@ -38,8 +42,9 @@ How each value is derived — the four classes used below:
 ## The chat template decides everything below it
 
 The served template — the file in your serve argv, or the snapshot's
-embedded `chat_template` if you pass none — is the artifact every
-[endpoint] row is derived *from*. Two consequences worth saying plainly:
+embedded `chat_template` if you pass none — is the artifact the four
+template-derived rows are derived *from*. Two consequences worth saying
+plainly:
 
 - **"Same model" does not mean "same template."** Serving the reference
   Qwen3-0.6B *without* the README's `--chat-template qwen3_training.jinja`

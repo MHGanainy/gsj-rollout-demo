@@ -6,15 +6,142 @@ From an episode to **a trajectory you can actually read** — one more.
 This is the demo for [gsj-harness-rollout-server](https://github.com/MHGanainy/gsj-harness-rollout-server):
 the rollout server that takes a task `(case, timestep, prompt)`, runs an
 agent in an isolated sandbox with temporally-scoped retrieval, and emits a
-training-ready trajectory. The
-[`-examples` repo](https://github.com/MHGanainy/gsj-harness-rollout-server-examples)
-shows a **trainer** how to train against an estate that already exists.
-*This* repo shows someone who has **documents, a config, and an inference
-endpoint** how to get an estate — and how to see what the agent did in it.
+training-ready trajectory. You bring three things — documents in the
+contract's shape, a `config.yaml` naming your inference endpoint, and that
+endpoint itself; one command derives everything else and stands the estate
+up, and one submit later you are reading what the agent did in it:
+
+```
+ you bring                     one command                     what you get
+ ─────────                     ───────────                     ────────────
+ your corpus   ─┐
+ (documents)    │  ./bootstrap.py up     docker run … submit   ./read.py show
+ config.yaml   ─┼─────────────────────▶ ─────────────────────▶ ────────────────
+ (three values) │  a running estate:     one episode:          the trajectory:
+ your inference─┘  validated corpus,     a sandboxed agent     every turn, every
+ endpoint          5 containers,         works the task        tool call, the
+                   derived pins          against your          cutoff checked —
+                                         endpoint              ready to train on
+```
+
+(The [`-examples` repo](https://github.com/MHGanainy/gsj-harness-rollout-server-examples)
+is the other half: it shows a **trainer** how to train against an estate
+that already exists. *This* repo is for the person who has to get the
+estate — and wants to see what the agent did in it.)
+
+## What to expect, measured
+
+The numbers below are measured, not estimated — most on one from-nothing
+run (library CP-36, the *stranger run*: a fresh clone, a fresh venv,
+anonymous image pulls, an Apple Silicon Mac, no prior state) against the
+reference stack — vLLM serving `Qwen/Qwen3-0.6B` host-local, the
+two-case synthetic corpus; where a number comes from another checkpoint,
+it says so. The CP-nn stamps name checkpoints of the library's measured
+record — one report per checkpoint under its
+[docs/reports](https://github.com/MHGanainy/gsj-harness-rollout-server/tree/main/docs/reports).
+Wrong expectations make a working system read as broken — the trainer
+repo learned that as
+[its finding F-18](https://github.com/MHGanainy/gsj-harness-rollout-server-examples/blob/main/FINDINGS.md)
+— so: what this costs, and what is normal.
+
+- **Install**: seconds — clone 1.5 s, venv + `pip install` 4.6 s
+  (measured, fast pipe). You bring Docker (compose v2) and Python >= 3.12.
+- **Disk**: **6–7 GB** of images (measured 6.3 GB; the pull transfers
+  less; an earlier README said 3.5 GB — that was the compressed estimate,
+  not disk). `work/` after four episodes: under 10 MB.
+- **`up`, cold on an empty docker host: ~2.5 min** — mostly image pulls
+  plus the first MCP embed (CP-36 measured the pieces cold: the 4.25 GB
+  mcp pull in 18 s on a fast pipe; no single cold run there completed
+  uninterrupted — the ARM detours of platform fact 1 split it, so the
+  ~2.5 min composes the measured pieces). Warm re-run: **~10 s**; after
+  `down`: ~40 s.
+- **One episode, end to end: ~20–40 s** against a host-local 0.6B engine
+  (measured at CP-36: 22.5 s thinking-off, 38.6 s thinking-on).
+- **Platform fact 1 — Apple Silicon / ARM works, slower, said out loud.**
+  Two of the four images (`gsj-mcp-service`, `gsj-pi-harness`) publish
+  `linux/amd64` only; the bootstrap detects an ARM host, pulls them
+  explicitly for emulation, and says so. The first MCP embed then runs
+  ~2 min under emulation (measured; native amd64 is faster) — episode
+  speed is unaffected, since the agent talks to your endpoint over HTTP.
+- **Platform fact 2 — a non-Qwen endpoint works, and the serve argv is
+  yours to write.** `up` derives the model-bound pins from your
+  endpoint's own template render, automatically; what nobody can derive
+  is your serve command — the tool-call parser and the sampling pins are
+  flags only you can set. [docs/MODEL-SURFACE.md](docs/MODEL-SURFACE.md)
+  walks the whole surface; the first non-Qwen episode
+  (Llama-3.1-8B-Instruct, CP-38) derived at `up`, preflighted all-ok, and
+  was accepted.
+- **Normal, not broken.** An empty quarantine is normal — the reference
+  stack measured 72/72 accepted at library CP-32, this demo's smoke 1/1.
+  A small model hitting the 8,192-token generation cap is labelled, not
+  silent: `submit` prints the `length-terminated:` line and `show` marks
+  the truncation twice — such an episode *qualified*, and whether to
+  train on it is the trainer's call. Degenerate episodes are the 0.6B
+  floor model being itself, honestly rendered: an early smoke episode
+  read `AGENTS.md` seventy times and wrote nothing, and the transcript
+  collapses the repetition and says NO deliverable was written.
+  Acceptance checks **provenance, not task success**.
+
+## What a trajectory looks like
+
+`./read.py show` on a real archived episode — this one from the CP-36
+stranger run, the 0.6B reference model (the demo's floor, honestly
+rendered), lightly trimmed at one marked spot:
+
+```
+== episode sk-polar-550e486e-f544-45cb-859a-060012f16791 (accepted; archived thinking-off) ==
+task        case_orchard @ timestep 2   (free, split train)
+status      COMPLETED
+model       Qwen/Qwen3-0.6B via openai_chat
+checkout    branch timestep-2, commit 48499faa81 — pages 1..2 (2 visible at this cutoff)
+turns       2 assistant turns, 2 tool calls
+tokens      prompt 2,835; response 460 (107 trainable = 23%)
+finish      stop
+deliverable NONE — no `write` call this session (acceptance checks provenance, not task success)
+system      4,466 chars, sha256 f56e8a6e9ea9dd1c… (the G2-pinned prompt — not repeated here)
+rebuilt     2/2 completions merged, 1 full chain(s); builder findings: 0
+timing      run 9.9s (init 0.2s, post 0.2s)
+
+-- the task prompt --------------------------------------------------
+What evidence about the true boundary line between the parcels is in the case file so far, and which way does each piece point? Cite pages as (page:N).
+
+-- the session ------------------------------------------------------
+[turn 1]
+   -> mcp_gsj_search_case {"query": "true boundary line between parcels", "k": 1}
+   -> mcp_gsj_search_decisions {"query": "true boundary line between parcels", "k": 1}
+   <- 1 hits, pages [2] — all <= timestep 2 (the cutoff holds)
+      page 2  score 0.52  md/page_0002.md
+         ## Page 2 — The 2019 fence survey A survey commissioned jointly in March 2019 and carried out by the public surveyor Lena Ortiz located the registered…
+   <- (288 chars)
+      [… the decisions-search hits, trimmed from this excerpt …]
+[turn 2]
+   - The true boundary line between the parcels is located in **Page 2** of the file.
+   - Each piece of evidence points to **Page 2** of the file.
+
+-- the deliverable --------------------------------------------------
+NO deliverable was written — no `write` call happened in this session.
+(This row's prompt is free-form (no skill card names a file); a session can qualify without one — qualification checks provenance, not task success.)
+```
+
+Three lines carry the demo's whole argument. The **checkout** line plus
+the search result's `all <= timestep 2 (the cutoff holds)` — the temporal
+cutoff is *observable* per episode, checked on the spot, not asserted.
+The **deliverable** line — this episode qualified (its provenance is
+sound) while plainly failing the task, and the system grades those two
+things separately, in the header. And the **tokens** line — `107
+trainable` is the loss-maskable span a trainer would actually consume
+(`./read.py export` hands over the same body as JSON, arrays referenced
+by sha256). A stronger model produces stronger sessions — the same
+stranger run's 6-turn `case_mill` episode read all three pages in order
+and wrote a coherent brief; what this weak one shows is that even the
+floor is rendered honestly. (The header's `run 9.9s` is the sandboxed
+session alone; the ~20–40 s expectation above is the whole
+submit→archive round trip.)
 
 ## The three inputs
 
-A corpus in [the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md),
+A corpus in [the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md)
+(drawn below, under "Bring your own corpus"),
 a `config.yaml` with your inference endpoint's URL and served-model name,
 and that endpoint itself — that is everything; the bootstrap derives the rest.
 A host-local endpoint (`http://127.0.0.1:…`) is fine: the bootstrap rewrites
@@ -29,7 +156,24 @@ server, the gateway, and the receiver);
 **pins** are this estate's approved fingerprints — tokenizer tail, system
 prompt, skill cards — the receiver validates every trace against them; a trace
 is **accepted** (it *qualified*) when it passes those provenance gates, which
-says nothing about task success.
+says nothing about task success. Four published images make the estate —
+Forgejo, `gsj-mcp-service`, `gsj-polar` (one image, three of the standing
+containers), and `gsj-pi-harness`, the per-episode sandbox (started per
+submit, not one of the five standing containers); **pi** is the agent
+harness that works the task inside that sandbox. The **gates** (G1–G7)
+are the receiver's per-trace validators — G1 pinned skill cards, G2 the
+pinned system prompt, G3 the tool roster, G5 the temporal cutoff, G6 the
+rendered tail before generation, G7 reconstruction and engine settings
+(G4's byte hashes are estate-side) — specified in the library's
+[checks-spec](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/checks-spec.md).
+
+The endpoint's contract, in one place: OpenAI-compatible chat completions
+with a working tool-call parser; a context window >= the harness's
+default 32,768; pinned sampling defaults (pi sends no sampling
+parameters, so your server's defaults ARE the sampling policy); and, for
+a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
+`/detokenize` — without them the reference defaults stand, loudly, and
+`config.yaml.example` names the manual keys that cure it.
 
 ## Run it
 
@@ -48,11 +192,8 @@ cp config.yaml.example config.yaml   # then fill in the three values:
 ./bootstrap.py up                 # the estate
 ```
 
-**Apple Silicon / ARM**: two of the four images (`gsj-mcp-service`,
-`gsj-pi-harness`) publish `linux/amd64` only. The bootstrap detects an ARM
-host, pulls them explicitly for emulation, and says so — the first MCP embed
-runs ~2 min under emulation (measured); episode speed is unaffected, since
-the agent talks to your endpoint over HTTP.
+**Apple Silicon / ARM**: handled automatically — the bootstrap pulls the
+two amd64-only images for emulation and says so (platform fact 1 above).
 
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → stand up **Forgejo** → **scaffold**
@@ -114,8 +255,8 @@ generation config IS your sampling policy — pi sends no sampling parameters.
 
 **1 — submit one episode** (the `up` printout's one-liner; row 0 of the
 taskbank the bootstrap built from your corpus — the `up` printout's taskbank
-line says how many rows yours produced; the synthetic corpus makes 4,
-0-based):
+line says how many rows yours produced; the synthetic corpus makes 4
+rows, numbered 0–3):
 
 ```bash
 docker run --rm --network gsj-demo-net \
@@ -143,14 +284,14 @@ which is the trainer's collection path, not this walkthrough's.
 ./read.py quarantine       # anything rejected: every finding, explained
 ```
 
-`show` renders: the task triple and the checkout (branch, **the pages
-visible at this cutoff**), each assistant turn, each tool call and its
-result, and the deliverable if one was written. Three things it is careful
-about, because they are the point:
+`show` renders what the excerpt above shows: the task triple and the
+checkout (branch, **the pages visible at this cutoff**), each assistant
+turn, each tool call and its result, and the deliverable if one was
+written. Three things it is careful about, because they are the point:
 
 - **Retrieval results show their pages.** Every `mcp_gsj_search_case` hit
   prints `page N`, and the transcript checks them against the episode's
-  timestep on the spot — `all <= timestep 12 (the cutoff holds)`. The
+  timestep on the spot — `all <= timestep 2 (the cutoff holds)`. The
   temporal cutoff is observable per-episode, not asserted.
 - **Thinking is rendered distinguishably** (the `|`-prefixed block inside
   the turn). The archive stores reasoning only inside the token arrays, so
@@ -160,7 +301,8 @@ about, because they are the point:
 - **Truncation is labelled where you will see it.** A `finish_reason:
   length` episode says so in the header AND at the point the text stops.
   It *qualified* — qualification checks provenance, not task success
-  (ADR-0025) — and whether to train on it is the trainer's call.
+  ([the library's ADR-0025](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/decisions/ADR-0025-length-termination-surfaced-not-screened.md))
+  — and whether to train on it is the trainer's call.
 
 `export` is a projection of the archived body — the trace fields keyed by
 name (counts, boundaries, gate results, reconstruction stats, page census,
@@ -205,30 +347,6 @@ at `up` time (the bootstrap derives them from the endpoint's own template
 render; re-run `./bootstrap.py up` with the endpoint live, and the
 preflight's `tokenizer tail` row verifies before an episode is spent).
 
-## Expectations, measured (reference stack, the two-case synthetic corpus)
-
-- `up`, cold on an empty docker host: **~2.5 min** (mostly image pulls +
-  first MCP embed; CP-36 measured the pieces cold — the 4.25 GB mcp pull
-  in 18 s on a fast pipe, the first embed ~2 min under ARM emulation
-  (native amd64 is faster) — no single cold run completed uninterrupted
-  there, the ARM wall above split it); warm re-run: **~10 s**; after
-  `down`: ~40 s. Disk: **6–7 GB** of images (measured 6.3 GB on the CP-36
-  run's variants; the pull transfers less; an earlier README said 3.5 GB —
-  that was the compressed estimate, not disk).
-- One episode end-to-end: **25–50 s** against a host-local 0.6B engine
-  (measured again at CP-36: 22.5 s off, 38.6 s thinking-on).
-- Qualification: expect near-total on the reference stack (the library's
-  CP-32 measured 72/72; this demo's smoke 1/1). An empty quarantine is
-  normal, not suspicious.
-- **A small model hitting the generation cap is visible, not broken.** The
-  0.6B reference model regularly ends brief-shaped tasks at the 8,192-token
-  cap — `submit` prints the ADR-0025 `length-terminated:` line and `show`
-  labels the truncation twice. Expect degenerate episodes too (the smoke's
-  first accepted episode read `AGENTS.md` seventy times and wrote nothing —
-  the transcript collapses the repetition and says NO deliverable was
-  written). A 0.6B agent is the demo's floor, honestly rendered, not its
-  recommendation.
-
 ## Bring your own model
 
 The estate does not require Qwen. When `inference.model` is not the
@@ -253,13 +371,48 @@ belongs: MODEL-SURFACE's "second family, measured" section.
 
 ## Bring your own corpus
 
-The synthetic corpus is the worked example of
-[the contract](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md):
-run `./synthetic/make_corpus.py` and read the tree it writes — `corpus.yaml`,
-`AGENTS.md`, `skills/*/SKILL.md`, and per-case `md/page_NNNN.md` pages under
-`train/` and `eval/` — that shape, with your documents in the pages, is all
-`bootstrap.py up` needs. `validate` names every rule your tree breaks
-before anything runs.
+The corpus is a directory tree in
+[the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md).
+The synthetic corpus is the worked example — `./synthetic/make_corpus.py`
+writes exactly this:
+
+```
+corpus-synthetic/
+├── corpus.yaml                  # names the corpus, the git identity, the sandbox image
+├── AGENTS.md                    # the agent's standing instructions (G2's pin derives from it)
+├── skills/
+│   └── brief/
+│       └── SKILL.md             # a task shape; G1 pins these bytes
+├── train/
+│   └── cases/
+│       └── case_orchard/        # one case = one document set
+│           ├── timestep-2/
+│           │   ├── pages/
+│           │   │   ├── page_0001.md     # what exists at cutoff t=2 …
+│           │   │   └── page_0002.md
+│           │   └── prompts.yaml         # tasks at this cutoff (optional — contract §4)
+│           └── timestep-4/
+│               ├── pages/
+│               │   └── page_0001.md … page_0004.md   # … two more pages exist by t=4
+│               └── prompts.yaml
+└── eval/
+    └── cases/
+        └── case_mill/
+            └── timestep-3/      # pages/ + prompts.yaml, the same shape
+```
+
+Pages are absolute-numbered `page_NNNN.md` under each
+`timestep-<T>/pages/` — a timestep holds every page visible at that
+cutoff, so a later timestep repeats the earlier pages and adds its own,
+contiguously from 1. (`up` scaffolds these source trees into per-case git
+repos with one `timestep-<T>` branch each — the `md/page_NNNN.md` paths
+you see in transcripts are that *generated* layout, not something you
+create.) After `up`, two derived files appear beside your tree:
+`taskbank.parquet` — the tasks, one row per prompt — and
+`corpus.lock.json`.
+
+That shape, with your documents in the pages, is all `bootstrap.py up`
+needs. `validate` names every rule your tree breaks before anything runs.
 
 The synthetic corpus is also the demo's proof: the 1998 easement deed
 exists only on `case_orchard`'s page 4, so an episode at timestep 2

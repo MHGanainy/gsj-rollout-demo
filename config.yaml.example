@@ -37,9 +37,10 @@ inference:
 # The served tokenizer's end-of-turn token id. The default (151645,
 # <|im_end|>) is Qwen3's. For any other inference.model the bootstrap
 # DERIVES this from your endpoint's own template render at `up` (needs
-# vLLM's /tokenize + /detokenize; on an engine without them the default
-# silently stands and THIS key is the cure — docs/MODEL-SURFACE.md has
-# the from-snapshot recipe). Set it explicitly only to override, and know
+# vLLM's /tokenize + /detokenize; on an engine without them the bootstrap
+# says so out loud, the reference default stands, and THIS key is the
+# cure — docs/MODEL-SURFACE.md has the from-snapshot recipe). Set it
+# explicitly only to override, and know
 # the explicit value wins (./preflight.py's end-of-turn row checks
 # whichever is in effect).
 #end_of_turn_token_id: 151645
