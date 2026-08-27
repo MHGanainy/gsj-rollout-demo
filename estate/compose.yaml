@@ -19,7 +19,7 @@ name: gsj-demo
 
 services:
   forgejo:
-    # The library's forgejo/ compose, minus its estate-bound lore: DNS name
+    # The library's estate/forgejo/ compose, minus its estate-bound lore: DNS name
     # instead of a static container IP, no published ports, same pinned
     # image, same headless-install switches.
     image: codeberg.org/forgejo/forgejo:16.0.2
