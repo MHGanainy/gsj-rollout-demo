@@ -270,14 +270,23 @@ def ensure_secret() -> str:
     return f.read_text().strip()
 
 
-def write_env_file(secret: str) -> None:
+def write_env_file(secret: str, read_token: str = "", signin: bool = False) -> None:
+    # The only channel from bootstrap into compose interpolation. CP-56 adds
+    # two keys: GSJ_FORGEJO_READ_TOKEN (the MCP's auth_token_env value) and
+    # GSJ_FORGEJO_SIGNIN (forgejo's REQUIRE_SIGNIN_VIEW). cmd_up rewrites this
+    # file across bring-up: signin stays false while the frozen pipeline
+    # scaffolds/verifies and the MCP cold-indexes (all anonymous-read), then
+    # flips true just before episodes — the two-phase the frozen ingest and
+    # mcp-service code force (their read paths cannot present a token).
     WORK.mkdir(exist_ok=True)
     ENV_FILE.write_text(
         f"GSJ_DEMO_WORK={WORK}\n"
         f"GSJ_DEMO_SESSIONS={WORK / 'sessions'}\n"
         f"GSJ_POLAR_IMAGE={POLAR_IMAGE}\n"
         f"GSJ_MCP_IMAGE={MCP_IMAGE}\n"
-        f"GSJ_MCP_TOKEN_SECRET={secret}\n")
+        f"GSJ_MCP_TOKEN_SECRET={secret}\n"
+        f"GSJ_FORGEJO_READ_TOKEN={read_token}\n"
+        f"GSJ_FORGEJO_SIGNIN={'true' if signin else 'false'}\n")
     ENV_FILE.chmod(0o600)
     (WORK / "sessions").mkdir(exist_ok=True)
     (WORK / "traces").mkdir(exist_ok=True)
@@ -315,19 +324,39 @@ def fcli(script: str) -> subprocess.CompletedProcess:
                capture_output=True)
 
 
+def _token_authenticates(tok_file: Path) -> bool:
+    if not (tok_file.is_file() and tok_file.read_text().strip()):
+        return False
+    # /api/v1/user answers only for a token carrying (read|write):user scope,
+    # so it validates BOTH the push token and the read token below.
+    code = (
+        "import httpx,sys\n"
+        f"r=httpx.get('{FORGEJO_URL}/api/v1/user',"
+        f"headers={{'Authorization':'token {tok_file.read_text().strip()}'}},timeout=5)\n"
+        f"sys.exit(0 if r.status_code==200 and r.json().get('login')=='{OWNER}' else 1)\n")
+    return in_net_python(code, timeout=30).returncode == 0
+
+
+def _mint_token(tok_file: Path, scopes: str, label: str) -> str:
+    if _token_authenticates(tok_file):
+        say(f"forgejo — {label} token already at {tok_file} (verified against the API)")
+        return tok_file.read_text().strip()
+    say(f"forgejo — generating a {label} token ({scopes})")
+    gen = fcli(f"forgejo admin user generate-access-token --username {OWNER} "
+               f"--token-name demo-{label}-{int(time.time())} --scopes {scopes} --raw")
+    if gen.returncode != 0:
+        die(f"{label} token generation failed.",
+            f"forgejo said: {gen.stderr.strip() or gen.stdout.strip()}")
+    tok_file.write_text(gen.stdout.strip().splitlines()[-1] + "\n")
+    tok_file.chmod(0o600)
+    if not _token_authenticates(tok_file):
+        die(f"the freshly generated {label} token does not authenticate.",
+            f"docker logs gsj-demo-forgejo; token lives at {tok_file}")
+    say(f"forgejo — {label} token verified, lives at {tok_file} (chmod 600)")
+    return tok_file.read_text().strip()
+
+
 def ensure_owner_token() -> str:
-    tok_file = SECRETS / f"forgejo-token-{OWNER}"
-
-    def token_ok() -> bool:
-        if not (tok_file.is_file() and tok_file.read_text().strip()):
-            return False
-        code = (
-            "import httpx,sys\n"
-            f"r=httpx.get('{FORGEJO_URL}/api/v1/user',"
-            f"headers={{'Authorization':'token {tok_file.read_text().strip()}'}},timeout=5)\n"
-            f"sys.exit(0 if r.status_code==200 and r.json().get('login')=='{OWNER}' else 1)\n")
-        return in_net_python(code, timeout=30).returncode == 0
-
     listing = fcli("forgejo admin user list")
     if listing.returncode != 0:
         die("forgejo's CLI did not answer inside the container.",
@@ -342,24 +371,16 @@ def ensure_owner_token() -> str:
                 f"forgejo said: {made.stderr.strip() or made.stdout.strip()}")
     else:
         say(f"forgejo — owner '{OWNER}' already exists")
+    return _mint_token(SECRETS / f"forgejo-token-{OWNER}",
+                       "write:repository,write:user", "push")
 
-    if token_ok():
-        say(f"forgejo — push token already at {tok_file} (verified against the API)")
-    else:
-        say("forgejo — generating a push token")
-        gen = fcli(f"forgejo admin user generate-access-token --username {OWNER} "
-                   f"--token-name demo-bootstrap-{int(time.time())} "
-                   f"--scopes write:repository,write:user --raw")
-        if gen.returncode != 0:
-            die("token generation failed.",
-                f"forgejo said: {gen.stderr.strip() or gen.stdout.strip()}")
-        tok_file.write_text(gen.stdout.strip().splitlines()[-1] + "\n")
-        tok_file.chmod(0o600)
-        if not token_ok():
-            die("the freshly generated token does not authenticate.",
-                f"docker logs gsj-demo-forgejo; token lives at {tok_file}")
-        say(f"forgejo — push token verified, lives at {tok_file} (chmod 600)")
-    return tok_file.read_text().strip()
+
+def ensure_read_token() -> str:
+    # CP-56: the read-scoped credential the sandbox clone and the MCP index use
+    # once the estate requires sign-in for read. read:user so it validates on
+    # /api/v1/user; read:repository is clone-only — it CANNOT push (proven).
+    return _mint_token(SECRETS / f"forgejo-read-token-{OWNER}",
+                       "read:repository,read:user", "read")
 
 
 # ------------------------------------------------------------------ pipeline
@@ -398,7 +419,9 @@ source:
   repos: {repos}
   ref_main: main
   ref_pattern: "timestep-{{T}}"
-  auth_token_env: null          # repos are public inside the estate
+  auth_token_env: GSJ_FORGEJO_READ_TOKEN   # CP-56: the MCP presents the
+  # read-scoped token when it clones/fetches the case repos, so its index
+  # build survives REQUIRE_SIGNIN_VIEW (the compose injects the value).
   clone_cache_dir: ./data/clones
 
 embedding:
@@ -856,16 +879,27 @@ def derive_pins(corpus: Path, model: str, thinking: str,
 
 # ------------------------------------------------------------ rollout config
 
-def write_rollout_yaml(demo: dict, derived_eot: "int | None" = None) -> str:
+def write_rollout_yaml(demo: dict, derived_eot: "int | None" = None,
+                       read_token: str = "") -> str:
     base_url = str(demo["inference"]["base_url"]).rstrip("/")
     rewritten = re.sub(r"^(https?://)(localhost|127\.0\.0\.1)(?=[:/]|$)",
                        r"\1host.docker.internal", base_url)
     if rewritten != base_url:
         say(f"engine — {base_url} is host-local; inside containers it is reached as "
             f"{rewritten} (the gateway maps host.docker.internal to your host)")
+    # CP-56: embed the read-scoped token in the clone URL. The demo's library
+    # runs from the pinned 0.1.2 image, whose config.py predates the
+    # clone_credential_env field — so the estate-side env-splice route (the
+    # H200's rollout.h200.yaml) would be rejected as an unknown key here; the
+    # token rides in the URL instead. pi_harness (>= CP-11, in the image)
+    # strips userinfo before the URL reaches any trace, so the token never
+    # lands in a trajectory — only in this local, gitignored rollout.yaml.
+    scheme, _, host_path = FORGEJO_URL.partition("://")
+    clone_base = (f"{scheme}://{OWNER}:{read_token}@{host_path}"
+                  if read_token else FORGEJO_URL)
     cfg = {
         "estate": {
-            "clone_url_for": f"{FORGEJO_URL}/{OWNER}/{{case_id}}.git",
+            "clone_url_for": f"{clone_base}/{OWNER}/{{case_id}}.git",
             "mcp_url_base": MCP_URL,
             "serving_base_url": rewritten,
             "model": demo["inference"]["model"],
@@ -1110,10 +1144,13 @@ def cmd_up(args) -> None:
     ids = case_ids(corpus)
 
     secret = ensure_secret()
-    write_env_file(secret)
+    write_env_file(secret)   # phase 1: sign-in OFF (the frozen pipeline + a
+                             # cold MCP index read anonymously — see write_env_file)
 
     forgejo_up()
     token = ensure_owner_token()
+    read_token = ensure_read_token()          # CP-56: the sandbox/MCP credential
+    write_env_file(secret, read_token)        # MCP now sees GSJ_FORGEJO_READ_TOKEN
     pipeline("scaffold", corpus, token, secret)
 
     write_mcp_config(ids)
@@ -1127,9 +1164,18 @@ def cmd_up(args) -> None:
     derived_eot = derive_pins(corpus, demo["inference"]["model"],
                               str(demo.get("thinking", "off")),
                               str(demo["inference"]["base_url"]))
-    engine_container_url = write_rollout_yaml(demo, derived_eot)
+    engine_container_url = write_rollout_yaml(demo, derived_eot, read_token)
     render_topology()
     ensure_sandbox_image()
+
+    # CP-56: the corpus is scaffolded, the index built, both while read was
+    # anonymous. NOW close anonymous read — a URL-guessing sandbox agent can no
+    # longer re-clone past its cutoff. The MCP holds a warm index (and the read
+    # token for any later fetch); the harness clones with the embedded token.
+    say("forgejo — enabling REQUIRE_SIGNIN_VIEW (CP-56: closing anonymous read)")
+    write_env_file(secret, read_token, signin=True)
+    forgejo_up()   # recreates forgejo with the flipped env + re-waits /healthz
+                   # (which stays anonymous-200 under sign-in — verified CP-56)
     polar_up(recreate=served_digest != estate_digest())
 
     engine_state = check_engine(engine_container_url, demo["inference"]["model"])

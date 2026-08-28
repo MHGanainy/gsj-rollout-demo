@@ -31,6 +31,11 @@ services:
       FORGEJO__server__ROOT_URL: http://forgejo:3000/
       FORGEJO__server__DISABLE_SSH: "true"        # HTTP-only estate
       FORGEJO__service__DISABLE_REGISTRATION: "true"
+      # CP-56: bootstrap.py flips this to "true" as the LAST bring-up step —
+      # after the frozen pipeline has scaffolded/verified and the MCP has built
+      # its index (all anonymous-read). Once true, anonymous clone/refs return
+      # 401, so a sandbox agent cannot re-clone a case repo past its cutoff.
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: ${GSJ_FORGEJO_SIGNIN:-false}
       FORGEJO__mailer__ENABLED: "false"
       FORGEJO__log__LEVEL: Warn
     volumes:
@@ -48,6 +53,9 @@ services:
       # The :? guard is the F-22 lesson: the secret must fail at bring-up,
       # never mid-episode. The bootstrap generates it and states its home.
       GSJ_MCP_TOKEN_SECRET: ${GSJ_MCP_TOKEN_SECRET:?generate via bootstrap.py — it lives in <work>/secrets/mcp-token-secret}
+      # CP-56: the mcp-config's auth_token_env names this var; empty while the
+      # index is built anonymously, the read token once sign-in is required.
+      GSJ_FORGEJO_READ_TOKEN: ${GSJ_FORGEJO_READ_TOKEN:-}
     volumes:
       - ${GSJ_DEMO_WORK}/mcp-data:/app/data
       - ${GSJ_DEMO_WORK}/mcp-config.yaml:/app/config.yaml:ro
