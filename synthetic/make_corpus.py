@@ -12,10 +12,11 @@ the 1998 easement deed exists ONLY on case_orchard's page 4 — an episode
 at timestep 2 must not see it (its checkout physically lacks the page and
 `search_case` is cutoff-filtered), an episode at timestep 4 must find it.
 
-AGENTS.md is written byte-identical to estate/AGENTS.reference.md — that
-text is what the reference system-prompt pin (G2) embeds, so a corpus that
-keeps it needs no G2 re-derivation at all (the bootstrap re-derives it
-anyway, from whatever AGENTS.md your corpus carries).
+AGENTS.md is written byte-identical to the reference AGENTS.md — the text
+the reference system-prompt pin (G2) embeds, read out of the library's own
+packaged capture (library >= 0.1.3; no demo-side copy since CP-61), so a
+corpus that keeps it needs no G2 re-derivation at all (the bootstrap
+re-derives it anyway, from whatever AGENTS.md your corpus carries).
 """
 
 import argparse
@@ -30,9 +31,9 @@ CORPUS_YAML = """\
 name: gsj-demo-synthetic
 owner: gsj-staging                    # the estate the bootstrap stands up
 forgejo:
-  base_url: http://forgejo:3000       # in-network DNS — the bootstrap's Forgejo
+  base_url: http://gsj-demo-forgejo:3000   # in-network DNS — the bring-up's Forgejo
 mcp:
-  url_base: http://mcp:8790           # in-network DNS — the bootstrap's retrieval
+  url_base: http://gsj-demo-mcp:8790       # in-network DNS — the bring-up's retrieval
 git:                                  # fixed identity => deterministic commit SHAs
   name: gsj-demo-fixtures
   email: fixtures@gsj.invalid
@@ -192,9 +193,15 @@ def main() -> int:
             return 1
         shutil.rmtree(out)
 
+    # the reference AGENTS.md comes out of the installed library's packaged
+    # capture — read (and tripwired) BEFORE anything is written, so a missing
+    # or inconsistent library leaves no half-built tree behind
+    sys.path.insert(0, str(REPO))
+    from bootstrap import reference_capture
+    cap, i, j = reference_capture()
     out.mkdir(parents=True)
     (out / "corpus.yaml").write_text(CORPUS_YAML)
-    shutil.copy(REPO / "estate" / "AGENTS.reference.md", out / "AGENTS.md")
+    (out / "AGENTS.md").write_bytes(cap[i:j])
     (out / "skills" / "brief").mkdir(parents=True)
     (out / "skills" / "brief" / "SKILL.md").write_text(SKILL_BRIEF)
 

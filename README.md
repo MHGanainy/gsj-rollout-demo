@@ -44,25 +44,40 @@ repo learned that as
 [its finding F-18](https://github.com/MHGanainy/gsj-harness-rollout-server-examples/blob/main/FINDINGS.md)
 — so: what this costs, and what is normal.
 
-- **Install**: seconds — clone 1.5 s, venv + `pip install` 4.6 s
-  (measured, fast pipe). You bring Docker (compose v2) and Python >= 3.12.
-- **Disk**: **6–7 GB** of images (measured 6.3 GB; the pull transfers
-  less; an earlier README said 3.5 GB — that was the compressed estimate,
-  not disk). `work/` after four episodes: under 10 MB.
-- **`up`, cold on an empty docker host: ~2.5 min** — mostly image pulls
-  plus the first MCP embed (CP-36 measured the pieces cold: the 4.25 GB
-  mcp pull in 18 s on a fast pipe; no single cold run there completed
-  uninterrupted — the ARM detours of platform fact 1 split it, so the
-  ~2.5 min composes the measured pieces). Warm re-run: **~10 s**; after
-  `down`: ~40 s.
+- **Install**: seconds — clone 1.7 s, venv + `pip install` 5.5 s
+  (measured at library CP-61, fast pipe). You bring Docker (compose v2),
+  Python >= 3.12 and git.
+- **Disk**: **~6 GB** of images (measured at library CP-61 on
+  Apple Silicon: the daemon grew 5.4 GB for the four images, whose sizes
+  sum to 6.1 GB — the pull transfers less; an earlier README said 3.5 GB —
+  that was the compressed estimate, not disk). `work/` after one episode:
+  10–14 MB.
+- **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively** — one uninterrupted
+  from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
+  image pulls, then the library's bring-up (Forgejo, the owner and its
+  tokens, the scaffold, the retrieval service's first embed — 28 s
+  natively — the taskbank, the round-trip verify — 126 s of it on that run, with Forgejo's first start, the scaffold and the verify running under emulation because its image had to be loaded out-of-band as an amd64 copy (F-78); 42 s with a native Forgejo s of it), then the Polar leg. Warm
+  re-run: **~13 s**; after `down`: ~35 s.
 - **One episode, end to end: ~20–40 s** against a host-local 0.6B engine
-  (measured at CP-36: 22.5 s thinking-off, 38.6 s thinking-on).
-- **Platform fact 1 — Apple Silicon / ARM works, slower, said out loud.**
-  Two of the four images (`gsj-mcp-service`, `gsj-pi-harness`) publish
-  `linux/amd64` only; the bootstrap detects an ARM host, pulls them
-  explicitly for emulation, and says so. The first MCP embed then runs
-  ~2 min under emulation (measured; native amd64 is faster) — episode
-  speed is unaffected, since the agent talks to your endpoint over HTTP.
+  (measured at CP-36: 22.5 s thinking-off, 38.6 s thinking-on; at CP-61,
+  on the estate the library's bring-up stood up: 21 s thinking-off). The
+  ceiling, stated: a session is cut off by the library at 900 s (its
+  `timeout_seconds` default) — a small model that loops on a tool error
+  burns all of it (measured at CP-61: the 0.6B model's skill-card row ran
+  463 turns of `read /workspace` → `EISDIR` before being stopped; the
+  receiver quarantined it as `ADM1:status_not_completed`), and that is the
+  floor model, not the estate.
+- **Platform fact 1 — Apple Silicon / ARM works, said out loud.** Three
+  of the four images run natively: `gsj-mcp-service:0.4.0` publishes
+  `linux/amd64` + `linux/arm64` under one tag since library CP-61 (its
+  amd64 predecessor ran ~2 min under emulation for the first embed; the
+  native first embed measured 22 s), and `gsj-polar` always did.
+  `gsj-pi-harness` still publishes `linux/amd64` only; an ARM docker
+  refuses a manifest with no matching platform rather than emulating, so
+  the bootstrap pulls it `--platform linux/amd64` explicitly and says so
+  — the per-episode sandbox then runs under emulation, and episode speed
+  is unaffected in practice, since the agent talks to your endpoint over
+  HTTP.
 - **Platform fact 2 — a non-Qwen endpoint works, and the serve argv is
   yours to write.** `up` derives the model-bound pins from your
   endpoint's own template render, automatically; what nobody can derive
@@ -80,7 +95,23 @@ repo learned that as
   floor model being itself, honestly rendered: an early smoke episode
   read `AGENTS.md` seventy times and wrote nothing, and the transcript
   collapses the repetition and says NO deliverable was written.
-  Acceptance checks **provenance, not task success**.
+  Acceptance checks **provenance, not task success**. One more line that
+  is normal: the bring-up prints `pins — WARNING: 1/1 skill card(s) are not
+  in the packaged approved set (G1)` — it checks the library's *packaged*
+  pins, not the ones this script derived for your corpus one step earlier
+  (which approve exactly your cards; library wishlist 51 (c)); episodes on
+  your skill rows are accepted at G1 — the bootstrap says so right after.
+  Likewise its `ports — 8080 is busy on this host; using 8081` lines: the
+  bring-up scans host ports for a Polar it expects on the host; here that
+  leg runs in containers and the chosen number is simply the one they use.
+- **Not normal, and not yours: `docker compose up forgejo` failing with
+  `manifests/sha256:… not found`.** Codeberg's registry lost the platform
+  manifests of `forgejo:16.0.2` — the tag the library's bring-up pins —
+  while still serving its index (measured 2026-08-30: 16.0.1 and 16.0.3
+  pull, 16.0.2 does not; F-78, library wishlist 52). Until the library
+  re-pins, the bring-up's own refusal says what to do: load the image from
+  a host that has it — `docker save codeberg.org/forgejo/forgejo:16.0.2 |
+  ssh <here> docker load` — and re-run `./bootstrap.py up`.
 
 ## What a trajectory looks like
 
@@ -178,10 +209,10 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 ## Run it
 
 ```bash
-# prerequisites: Docker (with compose v2), Python >= 3.12
+# prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.2'
+pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example — or bring your corpus
@@ -192,25 +223,48 @@ cp config.yaml.example config.yaml   # then fill in the three values:
 ./bootstrap.py up                 # the estate
 ```
 
-**Apple Silicon / ARM**: handled automatically — the bootstrap pulls the
-two amd64-only images for emulation and says so (platform fact 1 above).
+**Apple Silicon / ARM**: handled automatically — the one amd64-only image
+(the sandbox) is pulled for emulation and the bootstrap says so (platform
+fact 1 above).
 
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
-nothing runs against an invalid tree) → stand up **Forgejo** → **scaffold**
-the corpus into per-case repos → stand up the **MCP retrieval service** and
-**ingest** → build the **taskbank** → **verify** everything round-trip →
-derive **this estate's pins** → stand up **Polar** (rollout server, gateway,
-receiver — [as one published image](docs/ADR-0001-polar-as-a-container.md))
-→ print what is running, where, and how to stop it.
+nothing runs against an invalid tree) → pull the four images → derive
+**this estate's pins** from your corpus and your endpoint → hand your three
+values to **the library's own bring-up** (`python -m gsj_rollout.bringup`,
+the production tool the wheel ships since 0.1.3 — the exact answers it gets
+are written to `work/bringup-answers.yaml`), which stands up **Forgejo**,
+creates the owner and mints its tokens, **scaffolds** the corpus into
+per-case repos, stands up the **MCP retrieval service** and **ingests**,
+builds the **taskbank**, **verifies** everything round-trip, and writes its
+run record → re-address its `rollout.yaml` for containers and stand up
+**Polar** (rollout server, gateway, receiver —
+[as one published image](docs/ADR-0001-polar-as-a-container.md)) → print
+what is running, where, and how to stop it. Since library 0.1.3 this
+script *reads* config.yaml and drives that tool; nothing the tool does is
+re-implemented here (an operator with more than three inputs — an existing
+Forgejo to adopt, another owner, another embedding model — runs the tool
+directly; its `--help` lists every knob).
 
-Running `up` twice is safe — every step detects existing state and says so.
-`./bootstrap.py down` stops the estate; `down --wipe` resets it.
+Running `up` twice is safe — the bring-up reuses what stands (tokens
+verified, repos converged, the index matched by fingerprint) and says what
+it reused; the Polar leg is recreated only when its generated files
+changed. `./bootstrap.py down` stops the estate; `down --wipe` resets it.
 
-The estate is five services on the private `gsj-demo-net` docker network
-(**no host ports** — to talk to it, join the network, as every command below
-does). Everything it generates or archives lives under `work/` — except the
-taskbank (`taskbank.parquet` + `corpus.lock.json`), which is written beside
-your corpus because it is derived from your corpus and belongs with it.
+The estate is five containers on the `gsj-demo-net` docker network. The
+bring-up publishes Forgejo and the MCP on `127.0.0.1` host ports of its
+choosing (its recipe; the ports are in its `== run demo ==` block and in
+`work/runs/demo/run.json`); the Polar leg publishes **no host ports** — to
+talk to it, join the network, as every command below does. Everything the
+estate generates or archives lives under `work/` — the bring-up's run
+directory is `work/runs/demo/` (its `.env` holds every secret, mode 0600 —
+the only place a value is *written on purpose*: the retrieval service's
+clone cache under `work/runs/demo/mcp-data/` also carries the read token in
+its bare clones' git config, library wishlist 47, which is why the whole run
+directory is mode 0700; its `run.json` names variables, never values), the
+Polar leg's files are `work/estate/`, the archive is
+`work/traces/` — except the taskbank (`taskbank.parquet` +
+`corpus.lock.json`), which is written beside your corpus because it is
+derived from your corpus and belongs with it.
 
 ## Walkthrough: an episode, submitted and read
 
@@ -253,19 +307,37 @@ The last two flags are load-bearing: the symmetric chat template
 is why multi-turn episodes reconstruct as ONE chain, and the pinned
 generation config IS your sampling policy — pi sends no sampling parameters.
 
-**1 — submit one episode** (the `up` printout's one-liner; row 0 of the
-taskbank the bootstrap built from your corpus — the `up` printout's taskbank
+**1 — submit one episode** (the `up` printout's one-liner, with `--row 1`:
+the taskbank the bring-up built from your corpus — the printout's taskbank
 line says how many rows yours produced; the synthetic corpus makes 4
-rows, numbered 0–3):
+rows, numbered 0–3, and row 1 is the transcript shown above). The estate requires sign-in for read (a sandbox
+agent cannot re-clone a case past its cutoff), so the generated config
+names the read-scoped token by *variable* (`estate.clone_credential_env`)
+and `submit` presents its value — which lives only in the bring-up's
+`.env`, so source that first; the token never reaches a trace:
 
 ```bash
-docker run --rm --network gsj-demo-net \
-  -v "$PWD/work/estate:/estate" -v "$PWD/corpus-synthetic:/corpus" \
-  -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.2 \
-  gsj-rollout submit --config /estate/rollout.yaml \
-    --from-bank /corpus/taskbank.parquet --row 0
+( set -a; . work/runs/demo/.env; set +a      # the estate's secrets, into a SUBSHELL only
+  docker run --rm --network gsj-demo-net \
+    -v "$PWD/work/estate:/estate" -v "$PWD/corpus-synthetic:/corpus" \
+    -e GSJ_PINS_PATH=/estate/pins.gsj.json -e GSJ_FORGEJO_READ_TOKEN_GSJ_STAGING \
+    ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3 \
+    gsj-rollout submit --config /estate/rollout.yaml \
+      --from-bank /corpus/taskbank.parquet --row 1 )
 ```
+
+(The token variable's name follows your corpus's `owner:` —
+`GSJ_FORGEJO_READ_TOKEN_<OWNER>`; the `up` printout and `./bootstrap.py
+status` print the recipe with yours, and `estate.clone_credential_env` in
+`work/estate/rollout.yaml` names it. The subshell matters: `set -a` exports
+all five estate secrets, and a value left exported in your shell would beat
+the run's `.env` in compose's interpolation on a later `up`.)
+
+(One episode at a time under this one-liner: the client submits every
+task as `gsj-task`, and a second `submit` while the first still runs is
+refused with an opaque `409 Conflict` — pass `--task-id <another>` for a
+concurrent one, or wait. The README's example transcript is row 1,
+`case_orchard@2`; row 0 is the skill-card task the floor model loops on.)
 
 Polar starts a sandboxed episode container, the agent works the task
 against your endpoint and the estate's retrieval, and the finished trace is

@@ -4,9 +4,10 @@ and one command later: a running estate with the corpus ingested and
 verified.
 
     ./bootstrap.py validate   # check the corpus tree, nothing stood up
-    ./bootstrap.py up         # the whole estate: validate -> Forgejo ->
-                              # scaffold -> MCP -> ingest -> taskbank ->
-                              # verify -> pins -> Polar -> status
+    ./bootstrap.py up         # the whole estate: validate -> pins -> the
+                              # library's bring-up (Forgejo -> scaffold ->
+                              # MCP -> ingest -> taskbank -> verify) ->
+                              # Polar -> status
     ./bootstrap.py status     # what is running, where, and how to stop it
     ./bootstrap.py down       # stop the estate (data survives)
     ./bootstrap.py down --wipe  # stop AND delete <work>/ — a fresh estate
@@ -17,8 +18,18 @@ failed twice.
 
 The stranger's three inputs (config.yaml — see config.yaml.example):
 a corpus in the contract's shape, an inference endpoint URL, and the
-served model's name. Everything else about the estate is stood up by this
-script and therefore derived by it.
+served model's name. Everything else about the estate is derived.
+
+Since library 0.1.3 this script is a READER (library CP-61). The estate
+itself — the git host, the owner and its tokens, the scaffold, the
+retrieval service and its index, the taskbank, the round-trip verify, the
+run record — is stood up by the library's own bring-up, `python -m
+gsj_rollout.bringup` (the production tool, shipped in the wheel): this
+script maps config.yaml's three values onto that tool's answers and runs
+it. What it adds is exactly what the library's bring-up deliberately stops
+short of: THIS estate's pins, derived from your corpus and your endpoint,
+and the Polar leg — rollout server, gateway, receiver — as containers of
+one published image, so no second checkout or venv is ever needed.
 """
 
 import argparse
@@ -27,7 +38,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import shutil
 import subprocess
 import sys
@@ -38,33 +48,28 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.2'", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.2"
-MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.3.0"
-SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"
-LIB_MIN = (0, 1, 2)          # first wheel that ships the corpus pipeline
-NETWORK = "gsj-demo-net"
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3"
+MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.4.0"       # multi-arch since library CP-61
+SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 only (F-54)
+LIB_MIN = (0, 1, 3)          # first wheel that ships the bring-up (gsj_rollout.bringup)
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
-# ---- the estate's fixed in-network facts (derived, never the stranger's) ----
-OWNER = "gsj-staging"        # the pipeline's staging owner (contract)
-TOKEN_ENV = "GSJ_FORGEJO_TOKEN_GSJ_STAGING"
-FORGEJO_URL = "http://forgejo:3000"
-MCP_URL = "http://mcp:8790"
-ROLLOUT_URL = "http://polar-rollout:8080"
-GATEWAY_URL = "http://polar-gateway:8100"
-RECEIVER_URL = "http://receiver:8300"
-
+# ---- the run: the library's bring-up names everything after it -------------
+RUN = "demo"                       # -> compose project gsj-demo, containers
+NETWORK = f"gsj-{RUN}-net"         #    gsj-demo-forgejo / gsj-demo-mcp, this network
 WORK = HERE / "work"
-SECRETS = WORK / "secrets"
-ESTATE = WORK / "estate"
-COMPOSE = HERE / "estate" / "compose.yaml"
-ENV_FILE = WORK / "estate.env"
+RUNDIR = WORK / "runs" / RUN       # the bring-up's run directory (./runs/<name>/ from its cwd)
+ESTATE = WORK / "estate"           # the Polar leg's files: pins, rollout.yaml, topology
+COMPOSE = HERE / "estate" / "compose.yaml"   # the Polar leg only (three containers)
+POLAR_ENV = WORK / "polar.env"     # the Polar leg's non-secret compose values
+POLAR_PROJECT = f"gsj-{RUN}-polar"
+ROLLOUT_HOST, GATEWAY_HOST, RECEIVER_HOST = "polar-rollout", "polar-gateway", "receiver"
 
 _T0 = time.monotonic()
 
@@ -80,17 +85,22 @@ def die(what: str, fix: str) -> "None":
 
 
 def run(cmd: list, **kw) -> subprocess.CompletedProcess:
+    if cmd[:2] == ["docker", "compose"]:
+        kw.setdefault("env", scrubbed_env())
     return subprocess.run(cmd, text=True, **kw)
 
 
 def compose_cmd(*args: str) -> list:
-    return ["docker", "compose", "-f", str(COMPOSE),
-            "--env-file", str(ENV_FILE), *args]
+    # two env-files: the Polar leg's own values, then the bring-up's .env —
+    # the secrets, KEY='value', read by compose's dotenv parser (quotes
+    # stripped; `docker run --env-file` would NOT strip them)
+    return ["docker", "compose", "-f", str(COMPOSE), "--env-file", str(POLAR_ENV),
+            "--env-file", str(RUNDIR / ".env"), *args]
 
 
 def in_net_python(code: str, timeout: float = 600.0) -> subprocess.CompletedProcess:
-    """Run a python snippet on the estate network (the estate publishes no
-    host ports — from outside, you join the network; so does this script)."""
+    """Run a python snippet on the estate network (the Polar leg publishes
+    no host ports — from outside, you join the network; so does this script)."""
     return run(["docker", "run", "--rm", "--network", NETWORK,
                 "--add-host", "host.docker.internal:host-gateway",
                 POLAR_IMAGE, "python", "-c", code],
@@ -117,21 +127,42 @@ def check_docker() -> None:
 
 def check_library() -> None:
     import warnings
-    # the packaged-pins UserWarning warns about trace-validation gates; this
-    # estate derives its own pins and sets GSJ_PINS_PATH on every leg that
-    # validates traces, so in the bootstrap's own process it is pure noise
+    # the packaged-pins UserWarning is about trace-validation gates; this
+    # estate derives its own pins and names them (GSJ_PINS_PATH) on every
+    # leg that validates traces, so in this process it is pure noise
     warnings.filterwarnings("ignore", message="gsj_rollout.checks")
     try:
         import gsj_rollout  # noqa: F401
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.2'  (same environment you run bootstrap.py from)")
+            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (same environment "
+            "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates the packaged corpus pipeline.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.2'")
+        die(f"library {gsj_rollout.__version__} predates the packaged bring-up "
+            "(gsj_rollout.bringup, 0.1.3).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.3' pyarrow")
+    # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
+    # force-included at build time — a source/editable checkout of the
+    # library has none of them under gsj_rollout/
+    from importlib.util import find_spec
+    root = Path(find_spec("gsj_rollout").origin).parent
+    if find_spec("gsj_rollout.bringup") is None or not (root / "pins" / "pins.gsj.json").is_file():
+        die(f"this python has the library as a source checkout ({root}), not the wheel — "
+            "the bring-up, the corpus pipeline and the packaged pins ship only in the wheel.",
+            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (from PyPI, into the "
+            "environment you run bootstrap.py from)")
+    # what the bring-up refuses on, checked here BEFORE the image pulls
+    try:
+        import pyarrow  # noqa: F401 — the taskbank's parquet writer
+    except ImportError:
+        die("pyarrow is not importable from this python (the taskbank's parquet writer).",
+            "pip install pyarrow  (same environment)")
+    if shutil.which("git") is None:
+        die("`git` is not on PATH (the bring-up scaffolds the corpus into git repos).",
+            "install git and re-run")
 
 
 def load_demo_config(path: Path) -> dict:
@@ -198,52 +229,32 @@ def load_demo_config(path: Path) -> dict:
     return raw
 
 
-def check_corpus_yaml(corpus: Path) -> dict:
-    cy = corpus / "corpus.yaml"
-    if not cy.is_file():
-        die(f"{cy} does not exist — is '{corpus}' a corpus root?",
-            "point config.yaml's `corpus:` at a tree in the contract's shape, "
-            "or generate the worked example: ./synthetic/make_corpus.py")
-    doc = yaml.safe_load(cy.read_text()) or {}
-    fb = (doc.get("forgejo") or {}).get("base_url")
-    if fb != FORGEJO_URL:
-        die(f"{cy}: forgejo.base_url is {fb!r}, but this estate's Forgejo lives at "
-            f"{FORGEJO_URL} (in-network DNS).",
-            f"set   forgejo:\n              base_url: {FORGEJO_URL}")
-    mu = (doc.get("mcp") or {}).get("url_base")
-    if mu != MCP_URL:
-        die(f"{cy}: mcp.url_base is {mu!r}, but this estate serves retrieval at {MCP_URL}.",
-            f"set   mcp:\n              url_base: {MCP_URL}")
-    if doc.get("owner") != OWNER:
-        die(f"{cy}: owner is {doc.get('owner')!r}; this estate creates the owner '{OWNER}'.",
-            f"set   owner: {OWNER}")
-    if doc.get("sandbox_image") != SANDBOX_IMAGE:
-        die(f"{cy}: sandbox_image is {doc.get('sandbox_image')!r}; this estate runs episodes in "
-            f"the published harness image.",
-            f"set   sandbox_image: {SANDBOX_IMAGE}")
-    return doc
+def corpus_path(demo: dict) -> Path:
+    p = Path(demo["corpus"])
+    return p if p.is_absolute() else (HERE / p).resolve()
 
 
-def case_ids(corpus: Path) -> list:
-    ids = []
-    for split in ("train", "eval"):
-        cases = corpus / split / "cases"
-        if cases.is_dir():
-            ids += sorted(p.name for p in cases.iterdir() if p.is_dir())
-    if not ids:
-        die(f"no cases found under {corpus}/{{train,eval}}/cases/.",
-            "the contract needs at least one case somewhere — `validate` names the rules")
-    return ids
+def corpus_sandbox_image(corpus: Path) -> str:
+    """The image every task row names (corpus.yaml `sandbox_image`, a
+    contract-required key): the bring-up checks THAT one is present."""
+    doc = yaml.safe_load((corpus / "corpus.yaml").read_text()) or {}
+    image = doc.get("sandbox_image")
+    if not isinstance(image, str) or not image:
+        die(f"{corpus / 'corpus.yaml'} names no sandbox_image.",
+            f"set   sandbox_image: {SANDBOX_IMAGE}   (the published harness image)")
+    return image
 
 
 # ------------------------------------------------------------------ validate
 
 def phase_validate(corpus: Path) -> None:
     say(f"validate — the contract, against {corpus} (host-side, before anything runs)")
+    if not (corpus / "corpus.yaml").is_file():
+        die(f"{corpus / 'corpus.yaml'} does not exist — is '{corpus}' a corpus root?",
+            "point config.yaml's `corpus:` at a tree in the contract's shape, "
+            "or generate the worked example: ./synthetic/make_corpus.py")
     env = dict(os.environ)
-    # the packaged-pins UserWarning is about trace-validation gates; the
-    # corpus pipeline never consults pins, and the estate's legs get their
-    # derived pins via GSJ_PINS_PATH — so here it is pure noise
+    # the pipeline never consults pins (the warning is about trace gates)
     env["PYTHONWARNINGS"] = "ignore:gsj_rollout.checks"
     proc = run([sys.executable, "-m", "gsj_rollout.ingest_corpus",
                 "validate", "--corpus", str(corpus)], env=env)
@@ -255,219 +266,7 @@ def phase_validate(corpus: Path) -> None:
             "https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md")
 
 
-# ------------------------------------------------------------------- secrets
-
-def ensure_secret() -> str:
-    SECRETS.mkdir(parents=True, exist_ok=True)
-    f = SECRETS / "mcp-token-secret"
-    if f.is_file() and f.read_text().strip():
-        say(f"mcp secret — already at {f} (reusing)")
-    else:
-        f.write_text(secrets.token_hex(32) + "\n")
-        f.chmod(0o600)
-        say(f"mcp secret — generated, lives at {f} (chmod 600); the MCP service and "
-            "the gateway share it; episodes mint their tokens from it")
-    return f.read_text().strip()
-
-
-def write_env_file(secret: str, read_token: str = "", signin: bool = False) -> None:
-    # The only channel from bootstrap into compose interpolation. CP-56 adds
-    # two keys: GSJ_FORGEJO_READ_TOKEN (the MCP's auth_token_env value) and
-    # GSJ_FORGEJO_SIGNIN (forgejo's REQUIRE_SIGNIN_VIEW). cmd_up rewrites this
-    # file across bring-up: signin stays false while the frozen pipeline
-    # scaffolds/verifies and the MCP cold-indexes (all anonymous-read), then
-    # flips true just before episodes — the two-phase the frozen ingest and
-    # mcp-service code force (their read paths cannot present a token).
-    WORK.mkdir(exist_ok=True)
-    ENV_FILE.write_text(
-        f"GSJ_DEMO_WORK={WORK}\n"
-        f"GSJ_DEMO_SESSIONS={WORK / 'sessions'}\n"
-        f"GSJ_POLAR_IMAGE={POLAR_IMAGE}\n"
-        f"GSJ_MCP_IMAGE={MCP_IMAGE}\n"
-        f"GSJ_MCP_TOKEN_SECRET={secret}\n"
-        f"GSJ_FORGEJO_READ_TOKEN={read_token}\n"
-        f"GSJ_FORGEJO_SIGNIN={'true' if signin else 'false'}\n")
-    ENV_FILE.chmod(0o600)
-    (WORK / "sessions").mkdir(exist_ok=True)
-    (WORK / "traces").mkdir(exist_ok=True)
-    ESTATE.mkdir(exist_ok=True)
-
-
-# ------------------------------------------------------------------- forgejo
-
-def forgejo_up() -> None:
-    say("forgejo — docker compose up")
-    if run(compose_cmd("up", "-d", "forgejo")).returncode != 0:
-        die("`docker compose up forgejo` failed.",
-            "the compose error above is authoritative; if the image pull failed and "
-            "this host cannot reach registries, load codeberg.org/forgejo/forgejo:16.0.2 "
-            "out-of-band (docker save/load or skopeo) and re-run — local images are used as-is")
-    code = (
-        "import httpx,sys,time\n"
-        "deadline=time.time()+90\n"
-        "while time.time()<deadline:\n"
-        "    try:\n"
-        "        if httpx.get('http://forgejo:3000/api/healthz',timeout=3).status_code==200: sys.exit(0)\n"
-        "    except Exception: pass\n"
-        "    time.sleep(2)\n"
-        "sys.exit(1)\n")
-    if in_net_python(code, timeout=120).returncode != 0:
-        die("Forgejo did not answer /api/healthz within 90 s.",
-            "docker logs gsj-demo-forgejo — the first start initialises the instance; "
-            "re-run once it settles, or `./bootstrap.py down --wipe` for a clean slate")
-    say("forgejo — healthy at http://forgejo:3000 (in-network)")
-
-
-def fcli(script: str) -> subprocess.CompletedProcess:
-    # forgejo's CLI must run as the in-container `git` user
-    return run(compose_cmd("exec", "-T", "forgejo", "su", "git", "-c", script),
-               capture_output=True)
-
-
-def _token_authenticates(tok_file: Path) -> bool:
-    if not (tok_file.is_file() and tok_file.read_text().strip()):
-        return False
-    # /api/v1/user answers only for a token carrying (read|write):user scope,
-    # so it validates BOTH the push token and the read token below.
-    code = (
-        "import httpx,sys\n"
-        f"r=httpx.get('{FORGEJO_URL}/api/v1/user',"
-        f"headers={{'Authorization':'token {tok_file.read_text().strip()}'}},timeout=5)\n"
-        f"sys.exit(0 if r.status_code==200 and r.json().get('login')=='{OWNER}' else 1)\n")
-    return in_net_python(code, timeout=30).returncode == 0
-
-
-def _mint_token(tok_file: Path, scopes: str, label: str) -> str:
-    if _token_authenticates(tok_file):
-        say(f"forgejo — {label} token already at {tok_file} (verified against the API)")
-        return tok_file.read_text().strip()
-    say(f"forgejo — generating a {label} token ({scopes})")
-    gen = fcli(f"forgejo admin user generate-access-token --username {OWNER} "
-               f"--token-name demo-{label}-{int(time.time())} --scopes {scopes} --raw")
-    if gen.returncode != 0:
-        die(f"{label} token generation failed.",
-            f"forgejo said: {gen.stderr.strip() or gen.stdout.strip()}")
-    tok_file.write_text(gen.stdout.strip().splitlines()[-1] + "\n")
-    tok_file.chmod(0o600)
-    if not _token_authenticates(tok_file):
-        die(f"the freshly generated {label} token does not authenticate.",
-            f"docker logs gsj-demo-forgejo; token lives at {tok_file}")
-    say(f"forgejo — {label} token verified, lives at {tok_file} (chmod 600)")
-    return tok_file.read_text().strip()
-
-
-def ensure_owner_token() -> str:
-    listing = fcli("forgejo admin user list")
-    if listing.returncode != 0:
-        die("forgejo's CLI did not answer inside the container.",
-            f"docker logs gsj-demo-forgejo; then re-run — stderr was: {listing.stderr.strip()}")
-    if not re.search(rf"\b{OWNER}\b", listing.stdout):
-        say(f"forgejo — creating owner '{OWNER}'")
-        made = fcli(f"forgejo admin user create --username {OWNER} "
-                    f"--password {OWNER}-1 --email {OWNER}@gsj.invalid "
-                    f"--must-change-password=false")
-        if made.returncode != 0:
-            die(f"could not create the Forgejo owner '{OWNER}'.",
-                f"forgejo said: {made.stderr.strip() or made.stdout.strip()}")
-    else:
-        say(f"forgejo — owner '{OWNER}' already exists")
-    return _mint_token(SECRETS / f"forgejo-token-{OWNER}",
-                       "write:repository,write:user", "push")
-
-
-def ensure_read_token() -> str:
-    # CP-56: the read-scoped credential the sandbox clone and the MCP index use
-    # once the estate requires sign-in for read. read:user so it validates on
-    # /api/v1/user; read:repository is clone-only — it CANNOT push (proven).
-    return _mint_token(SECRETS / f"forgejo-read-token-{OWNER}",
-                       "read:repository,read:user", "read")
-
-
-# ------------------------------------------------------------------ pipeline
-
-def pipeline(phase: str, corpus: Path, token: str, secret: str,
-             extra: list = ()) -> None:
-    say(f"{phase} — python -m gsj_rollout.ingest_corpus, on the estate network")
-    t0 = time.monotonic()
-    proc = run(["docker", "run", "--rm", "--network", NETWORK,
-                "-v", f"{corpus}:/corpus",
-                "-e", f"{TOKEN_ENV}={token}",
-                "-e", f"GSJ_MCP_TOKEN_SECRET={secret}",
-                "-e", "PYTHONWARNINGS=ignore:gsj_rollout.checks",
-                POLAR_IMAGE, "python", "-m", "gsj_rollout.ingest_corpus",
-                phase, "--corpus", "/corpus", *extra])
-    if proc.returncode != 0:
-        die(f"the corpus pipeline's `{phase}` phase failed (exit {proc.returncode}).",
-            "the findings table above names each failing file and rule; fix and re-run "
-            "`./bootstrap.py up` — every phase is idempotent")
-    say(f"{phase} — done in {time.monotonic() - t0:.1f}s")
-
-
-# ----------------------------------------------------------------------- mcp
-
-MCP_CONFIG_TEMPLATE = """\
-# GENERATED by bootstrap.py — do not edit (re-run ./bootstrap.py up instead).
-# The service's schema is the library's estate/mcp-service/config.yaml; the values
-# here are the demo estate's: in-network URLs, and the repo list read from
-# YOUR corpus tree. Everything pinned (embedding revision, chunking, index
-# method) is kept byte-identical to the published image's reference config —
-# those pins are part of what makes retrieval reproducible.
-
-source:
-  base_url: {forgejo_url}
-  owner: {owner}
-  repos: {repos}
-  ref_main: main
-  ref_pattern: "timestep-{{T}}"
-  auth_token_env: GSJ_FORGEJO_READ_TOKEN   # CP-56: the MCP presents the
-  # read-scoped token when it clones/fetches the case repos, so its index
-  # build survives REQUIRE_SIGNIN_VIEW (the compose injects the value).
-  clone_cache_dir: ./data/clones
-
-embedding:
-  model: sentence-transformers/all-MiniLM-L6-v2
-  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41   # baked into the image
-  device: cpu
-  batch_size: 32
-  normalize: true
-
-chunking:
-  max_tokens: 220
-  overlap: 40
-  respect_page_boundaries: true
-
-index:
-  path: ./data/index
-  rebuild: if-stale
-
-search:
-  default_k: 5
-  max_k: 20
-  method: chroma
-
-decisions:
-  seed: 20260204
-  corpus_size: 30
-
-auth:
-  token_secret_env: GSJ_MCP_TOKEN_SECRET
-  leeway_s: 30
-
-server:
-  host: 0.0.0.0
-  port: 8790
-  log_level: info
-  request_log_fields: [episode_id, case_id, timestep, tool, k, n_results,
-                       latency_ms, cache_hit]
-"""
-
-
-def write_mcp_config(ids: list) -> None:
-    (WORK / "mcp-config.yaml").write_text(MCP_CONFIG_TEMPLATE.format(
-        forgejo_url=FORGEJO_URL, owner=OWNER,
-        repos="[" + ", ".join(ids) + "]"))
-    say(f"mcp — config generated for {len(ids)} case repo(s): {', '.join(ids)}")
-
+# -------------------------------------------------------------------- images
 
 def daemon_arch() -> str:
     """The DAEMON's architecture — the one that picks pull platforms. The
@@ -481,65 +280,36 @@ def daemon_arch() -> str:
     return arch or platform.machine().lower()
 
 
-def ensure_amd64_image(image: str) -> bool:
-    """F-54 (CP-36): two of the published images carry linux/amd64 only, and
-    an ARM docker REFUSES a manifest list with no matching platform instead
-    of falling back to emulation — `up` dies at the pull on every Apple
-    Silicon box. Cure it here: pull the amd64 variant explicitly (local
-    images are used as-is; Docker Desktop runs them under emulation —
-    measured on the CP-36 stranger run: first MCP embed ~2 min emulated,
-    episodes unaffected since they talk to your endpoint over HTTP).
-    Returns True when it pulled the image in this call."""
-    if daemon_arch() not in ("arm64", "aarch64"):
-        return False
-    if run(["docker", "image", "inspect", image],
-           capture_output=True).returncode == 0:
-        return False
-    say(f"arm64 — {image} publishes linux/amd64 only; pulling it explicitly "
-        "for emulation (first start is slower; rollout speed is unaffected)")
-    if run(["docker", "pull", "--platform", "linux/amd64", image]).returncode != 0:
-        die(f"could not pull {image} (linux/amd64) on this ARM host.",
-            "if this host cannot reach ghcr.io, load the image out-of-band "
-            "(docker save/load or skopeo) and re-run — local images are "
-            "used as-is")
-    return True
+def image_present(image: str) -> bool:
+    return run(["docker", "image", "inspect", image], capture_output=True).returncode == 0
 
 
-def mcp_up_wait() -> None:
-    say("mcp — docker compose up (first start clones and embeds; later starts "
-        "reuse the index via fingerprint)")
-    ensure_amd64_image(MCP_IMAGE)
-    if run(compose_cmd("up", "-d", "mcp")).returncode != 0:
-        die("`docker compose up mcp` failed.",
-            f"the compose error above is authoritative; if the pull failed, load {MCP_IMAGE} "
-            "out-of-band and re-run — and a `no matching manifest for "
-            "linux/arm64` error means this image has no ARM variant: "
-            f"docker pull --platform linux/amd64 {MCP_IMAGE}")
-    code = (
-        "import httpx,sys,time\n"
-        "deadline=time.time()+900; last=''\n"
-        "while time.time()<deadline:\n"
-        "    try:\n"
-        "        h=httpx.get('http://mcp:8790/health',timeout=5).json()\n"
-        "        line=f\"{h.get('state')} {h.get('progress','')}\"\n"
-        "        if line!=last: print(line,flush=True); last=line\n"
-        "        if h.get('state')=='ready':\n"
-        "            print('index_reused:',h.get('index_reused'),flush=True); sys.exit(0)\n"
-        "        if h.get('state')=='error': print(h,flush=True); sys.exit(2)\n"
-        "    except Exception: pass\n"
-        "    time.sleep(3)\n"
-        "sys.exit(1)\n")
-    proc = run(["docker", "run", "--rm", "--network", NETWORK, POLAR_IMAGE,
-                "python", "-c", code], timeout=960)
-    if proc.returncode == 2:
-        die("the MCP service reached state=error while indexing.",
-            "docker logs gsj-demo-mcp — a missing case repo means the scaffold phase "
-            "did not push what the generated config lists; re-run ./bootstrap.py up")
-    if proc.returncode != 0:
-        die("the MCP service did not reach state=ready within 900 s.",
-            "docker logs gsj-demo-mcp for the indexing state; large corpora embed for "
-            "a while on cpu — re-run to keep waiting (the index survives restarts)")
-    say("mcp — ready at http://mcp:8790 (in-network)")
+def ensure_image(image: str, what: str, amd64_only: bool = False) -> None:
+    """Pull every published image up front: the library's bring-up checks
+    that the retrieval and sandbox images are PRESENT and never pulls (the
+    production box cannot), and the first episode must not be the moment
+    you learn your registry path is broken. F-54's cure survives here: an
+    ARM docker REFUSES a manifest with no arm64 variant instead of
+    emulating — pull the amd64 variant explicitly and say so (Docker
+    Desktop then runs it under emulation; measured at library CP-36, and
+    since CP-61 only the sandbox image still needs it)."""
+    if image_present(image):
+        say(f"images — {image} present ({what})")
+        return
+    say(f"images — pulling {image} ({what})")
+    if run(["docker", "pull", image]).returncode == 0:
+        return
+    if amd64_only and daemon_arch() in ("arm64", "aarch64"):
+        say(f"arm64 — {image} publishes linux/amd64 only; pulling it explicitly "
+            "for emulation (slower to start; episode speed is unaffected — the "
+            "agent talks to your endpoint over HTTP)")
+        if run(["docker", "pull", "--platform", "linux/amd64", image]).returncode == 0:
+            return
+    die(f"could not pull {image} (the docker error above is authoritative).",
+        "if this host cannot reach ghcr.io, load the image out-of-band "
+        "(docker save/load or skopeo) and re-run — local images are used as-is"
+        + ("" if amd64_only else "; a `no matching manifest` error would mean the "
+           "registry lost this image's variant for your platform — report it"))
 
 
 # ---------------------------------------------------------------------- pins
@@ -682,8 +452,49 @@ def derive_endpoint_pins(base_url: str, model: str, thinking: str) -> dict:
             "max_model_len": max_len, "why": None}
 
 
+# pi embeds the workspace's AGENTS.md verbatim between these two markers
+# in the system prompt it sends (pi 0.83.0, pinned by the sandbox image);
+# the packaged capture holds the reference corpus's AGENTS.md there.
+_AGENTS_OPEN = b'<project_instructions path="/workspace/AGENTS.md">\n'
+_AGENTS_CLOSE = b"\n</project_instructions>"
+
+
+def reference_capture() -> "tuple[bytes, int, int]":
+    """The wheel's packaged G2 capture and the [i, j) span of its embedded
+    AGENTS.md — read from the installed library (library CP-60 ships it
+    beside the pins; CP-43's find_spec pattern), no demo-side copy since
+    CP-61. Tripwires before trust: the capture must hash into the packaged
+    approved set, and the AGENTS markers must occur exactly once."""
+    from importlib.util import find_spec
+    spec = find_spec("gsj_rollout")
+    if spec is None or not spec.origin:
+        die(f"the gsj-harness-rollout-server library is not importable from this python "
+            f"({sys.executable}).",
+            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (same environment)")
+    pins_root = Path(spec.origin).parent / "pins"
+    cap = pins_root / "container" / "system_prompt.container.derived.txt"
+    if not cap.is_file():
+        die(f"the installed library ships no G2 capture at {cap}.",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.3' (0.1.3 is the first "
+            "wheel that carries it)")
+    ref_prompt = cap.read_bytes()
+    approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
+    if hashlib.sha256(ref_prompt).hexdigest() not in approved:
+        die("the library's packaged G2 capture does not hash into its own packaged "
+            "system_prompt_hash — the installed wheel is inconsistent.",
+            "reinstall the library (pip install -U --force-reinstall "
+            "'gsj-harness-rollout-server>=0.1.3') and report it if that does not cure it")
+    if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
+        die("the packaged G2 capture does not embed AGENTS.md between pi's "
+            "<project_instructions> markers exactly once — the substitution "
+            "derivation is unsound against this capture.",
+            "a library whose capture came from a different pi: report it")
+    i = ref_prompt.index(_AGENTS_OPEN) + len(_AGENTS_OPEN)
+    return ref_prompt, i, ref_prompt.index(_AGENTS_CLOSE, i)
+
+
 def derive_pins(corpus: Path, model: str, thinking: str,
-                base_url: str | None = None) -> "int | None":
+                base_url: "str | None" = None) -> "int | None":
     from importlib.util import find_spec
     pins_root = Path(find_spec("gsj_rollout").origin).parent / "pins"
     # ADR-0024: a non-off thinking level needs the thinking-on pins on both
@@ -693,23 +504,14 @@ def derive_pins(corpus: Path, model: str, thinking: str,
                 if thinking != "off" else pins_root / "pins.gsj.json")
     doc = json.loads(packaged.read_text())
 
-    ref_prompt = (HERE / "estate" / "system_prompt.reference.txt").read_bytes()
-    ref_agents = (HERE / "estate" / "AGENTS.reference.md").read_bytes()
-    # Tripwires before trust (the derive_pins.py discipline): the reference
-    # artifacts must still agree with the wheel's packaged singleton, and the
-    # AGENTS span must occur exactly once or substitution is meaningless.
+    ref_prompt, i, j = reference_capture()
     if hashlib.sha256(ref_prompt).hexdigest() not in doc["pins"]["system_prompt_hash"]:
-        die("estate/system_prompt.reference.txt no longer matches the wheel's packaged "
-            "G2 singleton — the reference artifact drifted from the library.",
-            "update the demo repo (the artifact is a provenance-stamped copy of the "
-            "library's pins/container/ capture) — do not hand-edit pins")
-    if ref_prompt.count(ref_agents) != 1:
-        die("the reference system prompt does not embed the reference AGENTS.md exactly "
-            "once — the substitution derivation is unsound here.",
-            "update the demo repo's estate/ reference artifacts together")
-
+        die(f"{packaged} does not pin the packaged G2 capture — the library's two "
+            "packaged pins documents disagree about the reference system prompt.",
+            "reinstall the library and report it if that does not cure it")
+    ref_agents = ref_prompt[i:j]
     corpus_agents = (corpus / "AGENTS.md").read_bytes()
-    derived_prompt = ref_prompt.replace(ref_agents, corpus_agents)
+    derived_prompt = ref_prompt[:i] + corpus_agents + ref_prompt[j:]
     doc["pins"]["system_prompt_hash"] = [hashlib.sha256(derived_prompt).hexdigest()]
 
     cards = sorted(
@@ -718,8 +520,8 @@ def derive_pins(corpus: Path, model: str, thinking: str,
     doc["pins"]["skill_card_hash"] = cards
 
     doc["derived_at"] = "gsj-rollout-demo bootstrap (G1 from the corpus's skill cards; " \
-                        "G2 by AGENTS.md byte-substitution on the reference capture; " \
-                        "all other sets are the reference estate's)"
+                        "G2 by AGENTS.md byte-substitution on the packaged reference " \
+                        "capture; all other sets are the reference estate's)"
 
     # This generated artifact must not claim the reference estate's
     # provenance for values derived here (audit C11): the estate identity,
@@ -755,12 +557,14 @@ def derive_pins(corpus: Path, model: str, thinking: str,
     }
     prov["system_prompt_hash"] = {
         "algo": "sha256_bytes",
-        "artifacts": ["estate/system_prompt.reference.txt with its "
-                      "AGENTS.md span replaced by <corpus>/AGENTS.md"],
+        "artifacts": ["the installed library's gsj_rollout/pins/container/"
+                      "system_prompt.container.derived.txt with its "
+                      "<project_instructions path=\"/workspace/AGENTS.md\"> span "
+                      "replaced by <corpus>/AGENTS.md"],
         "notes": "G2 — derived by this bootstrap: byte-substitution of "
-                 "this corpus's AGENTS.md into the reference capture "
-                 "(which embeds the reference AGENTS.md exactly once — "
-                 "verified before substituting).",
+                 "this corpus's AGENTS.md into the packaged reference "
+                 "capture (which embeds the reference AGENTS.md between "
+                 "pi's markers exactly once — verified before substituting).",
     }
     if "non_g6_sets" in prov:
         # the thinking-on packaged doc carries one collective block whose
@@ -877,56 +681,38 @@ def derive_pins(corpus: Path, model: str, thinking: str,
     return derived_eot
 
 
-# ------------------------------------------------------------ rollout config
+# --------------------------------------------------- the library's bring-up
 
-def write_rollout_yaml(demo: dict, derived_eot: "int | None" = None,
-                       read_token: str = "") -> str:
-    base_url = str(demo["inference"]["base_url"]).rstrip("/")
-    rewritten = re.sub(r"^(https?://)(localhost|127\.0\.0\.1)(?=[:/]|$)",
-                       r"\1host.docker.internal", base_url)
-    if rewritten != base_url:
-        say(f"engine — {base_url} is host-local; inside containers it is reached as "
-            f"{rewritten} (the gateway maps host.docker.internal to your host)")
-    # CP-56: embed the read-scoped token in the clone URL. The demo's library
-    # runs from the pinned 0.1.2 image, whose config.py predates the
-    # clone_credential_env field — so the estate-side env-splice route (the
-    # H200's rollout.h200.yaml) would be rejected as an unknown key here; the
-    # token rides in the URL instead. pi_harness (>= CP-11, in the image)
-    # strips userinfo before the URL reaches any trace, so the token never
-    # lands in a trajectory — only in this local, gitignored rollout.yaml.
-    scheme, _, host_path = FORGEJO_URL.partition("://")
-    clone_base = (f"{scheme}://{OWNER}:{read_token}@{host_path}"
-                  if read_token else FORGEJO_URL)
-    cfg = {
-        "estate": {
-            "clone_url_for": f"{clone_base}/{OWNER}/{{case_id}}.git",
-            "mcp_url_base": MCP_URL,
-            "serving_base_url": rewritten,
-            "model": demo["inference"]["model"],
-        },
-        "runtime": {"image": SANDBOX_IMAGE, "network": NETWORK},
-        "polar": {
-            "rollout": {"host": "0.0.0.0", "port": 8080,
-                        "public_url": ROLLOUT_URL},
-            "gateway": {"id": "gsj-demo-node", "host": "0.0.0.0", "port": 8100,
-                        "public_url": GATEWAY_URL},
-        },
-        "receiver": {"host": "0.0.0.0", "port": 8300,
-                     "public_url": RECEIVER_URL,
-                     "traces_dir": "/estate/traces"},
+def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
+    """config.yaml's three values, mapped onto the bring-up's answers file
+    (keys are its long flag names): everything else it asks — owner,
+    create-vs-adopt, ports, embedding identity, chunking — takes the
+    tool's own default, which is what the demo estate is."""
+    answers = {
+        "corpus": str(corpus),
+        "name": RUN,
+        "forgejo": "create",           # the demo always CREATES its estate
+        "mcp": "create",
+        "mcp_image": MCP_IMAGE,        # pulled above — the bring-up checks presence only
+        "engine_url": str(demo["inference"]["base_url"]).rstrip("/"),
+        "engine_model": demo["inference"]["model"],
+        "thinking": str(demo.get("thinking", "off")),
+        # the gateway's public URL must be ONE address the rollout server and
+        # every sandbox dial (library CP-03); all three are containers on the
+        # estate network here, so the compose DNS name is that address and the
+        # bring-up's host-address probe is skipped
+        "gateway_host": GATEWAY_HOST,
     }
-    harness = {}
-    if demo.get("thinking", "off") != "off":
-        harness["thinking"] = str(demo["thinking"])
-    if "context_window" in demo:
-        harness["context_window"] = int(demo["context_window"])
-    if "max_tokens" in demo:
-        harness["max_tokens"] = int(demo["max_tokens"])
-    if harness:
-        cfg["harness"] = harness
+    # every harness value is answered on EVERY run — an omitted answer would
+    # take the previous run's recorded value, not the library default, and
+    # config.yaml (not run.json) is the source of truth here: a key deleted
+    # from it, or a model switched back to the reference, must take effect
+    from gsj_rollout.config import BuilderConfig, HarnessConfig
+    answers["context_window"] = int(demo.get("context_window", HarnessConfig().context_window))
+    answers["max_tokens"] = int(demo.get("max_tokens", HarnessConfig().max_tokens))
     if "end_of_turn_token_id" in demo:
         explicit = int(demo["end_of_turn_token_id"])
-        cfg["builder"] = {"end_of_turn_token_id": explicit}
+        answers["end_of_turn_token_id"] = explicit
         if derived_eot is not None and derived_eot != explicit:
             say(f"config — WARNING: config.yaml pins end_of_turn_token_id "
                 f"{explicit}, but the endpoint's own template render derives "
@@ -934,32 +720,138 @@ def write_rollout_yaml(demo: dict, derived_eot: "int | None" = None,
                 "reconstruction mis-splits every multi-turn episode. Delete "
                 "the key from config.yaml to use the derived value.")
     elif derived_eot is not None:
-        cfg["builder"] = {"end_of_turn_token_id": int(derived_eot)}
+        answers["end_of_turn_token_id"] = int(derived_eot)
+    else:
+        # the reference model's id (the library default) — also what a
+        # non-reference model gets when the endpoint derivation failed
+        # (derive_pins said so out loud; the pins file records it)
+        answers["end_of_turn_token_id"] = BuilderConfig().end_of_turn_token_id
+    out = WORK / "bringup-answers.yaml"
+    out.write_text("# GENERATED by bootstrap.py from config.yaml — the answers handed to\n"
+                   "# `python -m gsj_rollout.bringup up --answers` (no secrets here; the\n"
+                   f"# bring-up mints its own into {RUNDIR / '.env'}).\n"
+                   + yaml.safe_dump(answers, sort_keys=False))
+    return out
+
+
+def bringup(*args: str) -> None:
+    """The library's own bring-up (0.1.3 ships it as gsj_rollout.bringup),
+    run as a subprocess from work/: its runs land under ./runs/<name>/ of
+    the cwd (0.1.3 has no --runs-dir), so work/runs/demo/ is this estate's
+    run directory. GSJ_PINS_PATH names THIS estate's pins — derived before
+    the call — which silences the library's import-time packaged-pins
+    warning (its own G1 check still reads the packaged set: see cmd_up).
+    Its closing block prescribes host-run Polar commands; the demo runs
+    that leg itself, in containers, right after — so that block (from its
+    `next —` line, after the `== run <name> ==` header of 0.1.3) is not
+    echoed."""
+    env = {**scrubbed_env(), "GSJ_PINS_PATH": str(ESTATE / "pins.gsj.json")}
+    verb = args[0]
+    say("bring-up — python -m gsj_rollout.bringup " + " ".join(args)
+        + f"  (the library's production tool; cwd {WORK})")
+    proc = subprocess.Popen([sys.executable, "-m", "gsj_rollout.bringup", *args],
+                            cwd=WORK, env=env, stdout=subprocess.PIPE, text=True, bufsize=1)
+    header = muted = False
+    for line in proc.stdout:
+        header = header or line.startswith(f"== run {RUN} ==")
+        if header and line.startswith("next — "):
+            muted = True
+        if not muted:
+            print(line, end="", flush=True)
+    proc.wait()
+    if proc.returncode != 0:
+        die(f"the library's bring-up exited {proc.returncode} on `{verb}` — its REFUSED "
+            "block above names what it found, what it expected, and what to do.",
+            f"fix what it names and re-run ./bootstrap.py {verb} — every phase is "
+            "idempotent. If it names a bring-up flag this script does not pass "
+            "(--overwrite-repos, --rebuild, --retarget are forwarded from "
+            "./bootstrap.py up; others are not), either pass one of those, run "
+            "`./bootstrap.py down --wipe` for a fresh estate, or run the tool "
+            "directly: python -m gsj_rollout.bringup up --help")
+
+
+def scrubbed_env() -> dict:
+    """The environment for the bring-up and for compose, minus every estate
+    secret name: a value exported into this shell (a sourced .env of an
+    earlier estate, say) would otherwise beat the run's own .env in
+    compose's interpolation — silently, mid-episode."""
+    return {k: v for k, v in os.environ.items()
+            if not k.startswith("GSJ_FORGEJO_") and k != "GSJ_MCP_TOKEN_SECRET"}
+
+
+def load_run() -> dict:
+    rec = RUNDIR / "run.json"
+    if not rec.is_file():
+        die(f"the bring-up left no record at {rec}.",
+            "this is a bootstrap bug — report it with the output above")
+    return json.loads(rec.read_text())
+
+
+# ------------------------------------------------------------ rollout config
+
+def containerize_rollout_yaml(demo: dict, rec: dict) -> str:
+    """The bring-up's rollout.yaml addresses a Polar that runs on the
+    host (loopback rollout server and receiver, host paths). This estate
+    runs that leg as three containers of one image on the estate network,
+    so the demo re-addresses exactly those values and keeps everything
+    else the bring-up wrote — the credentialed clone (clone_credential_env
+    names the read token; the value stays in the run's .env), the
+    in-network Forgejo/MCP URLs, the harness values, the ports."""
+    src = yaml.safe_load((RUNDIR / "rollout.yaml").read_text())
+    cfg = json.loads(json.dumps(src))          # a deep copy
+    est = cfg["estate"]
+    if est.get("clone_credential_env") != rec["forgejo"]["read_token_env"]:
+        die("the bring-up's rollout.yaml does not name the read token the run "
+            "minted (estate.clone_credential_env).",
+            "this is a bootstrap bug — report it with work/runs/demo/rollout.yaml")
+    base_url = str(demo["inference"]["base_url"]).rstrip("/")
+    rewritten = re.sub(r"^(https?://)(localhost|127\.0\.0\.1)(?=[:/]|$)",
+                       r"\1host.docker.internal", base_url)
+    if rewritten != base_url:
+        say(f"engine — {base_url} is host-local; inside containers it is reached as "
+            f"{rewritten} (the gateway maps host.docker.internal to your host)")
+    est["serving_base_url"] = rewritten
+    ro = cfg["polar"]["rollout"]
+    ro["host"], ro["public_url"] = "0.0.0.0", f"http://{ROLLOUT_HOST}:{ro['port']}"
+    gw = cfg["polar"]["gateway"]
+    if gw.get("public_url") != f"http://{GATEWAY_HOST}:{gw['port']}":
+        die(f"the bring-up wrote gateway.public_url {gw.get('public_url')!r}; the demo "
+            f"asked for http://{GATEWAY_HOST}:{gw['port']}.",
+            "this is a bootstrap bug — report it with work/runs/demo/rollout.yaml")
+    rc = cfg["receiver"]
+    rc["host"], rc["public_url"] = "0.0.0.0", f"http://{RECEIVER_HOST}:{rc['port']}"
+    rc["traces_dir"] = "/estate/traces"
+    cfg["harness"]["artifacts_dir"] = "/estate/artifacts"
     if "generation_prompt_glue_ids" in demo:
-        glue = demo["generation_prompt_glue_ids"]
-        if not (isinstance(glue, list) and glue
-                and all(isinstance(t, int) and not isinstance(t, bool)
-                        for t in glue)):
-            die("config.yaml: generation_prompt_glue_ids must be a non-empty "
-                "list of token ids.",
-                "./preflight.py's template row prints the exact list when the "
-                "stitch applies; delete the key if it does not")
-        cfg.setdefault("builder", {})["generation_prompt_glue_ids"] = \
-            [int(t) for t in glue]
+        glue = [int(t) for t in demo["generation_prompt_glue_ids"]]
+        cfg.setdefault("builder", {})["generation_prompt_glue_ids"] = glue
         say(f"config — glue stitch armed: reconstruction re-inserts "
             f"{glue} at each turn opening (set from config.yaml because "
             "./preflight.py measured a constant template divergence)")
-    text = ("# GENERATED by bootstrap.py from config.yaml — do not edit; edit\n"
-            "# config.yaml and re-run ./bootstrap.py up. Schema: the library's\n"
-            "# `one YAML` (gsj_rollout/config.py).\n"
+    text = ("# GENERATED by bootstrap.py — do not edit; edit config.yaml and re-run\n"
+            "# ./bootstrap.py up. The library's bring-up wrote work/runs/demo/rollout.yaml\n"
+            "# for a host-run Polar; this copy re-addresses the rollout server, the\n"
+            "# receiver and the paths for the three containers that run that leg here.\n"
+            "# Schema: the library's `one YAML` (gsj_rollout/config.py). Secrets are\n"
+            f"# named, never written: {est['clone_credential_env']} and\n"
+            f"# {est['mcp_token_secret_env']} live in work/runs/demo/.env.\n"
             + yaml.safe_dump(cfg, sort_keys=False))
     (ESTATE / "rollout.yaml").write_text(text)
-    say(f"config — rollout.yaml generated at {ESTATE / 'rollout.yaml'}")
+    # the receiver's `serve` re-renders topology.rendered.yaml beside ITS
+    # config at every start; Polar's two containers read the one rendered
+    # below, so the receiver gets its own copy in its own directory and the
+    # two never alias (library wishlist 51 (g))
+    (ESTATE / "receiver").mkdir(exist_ok=True)
+    (ESTATE / "receiver" / "rollout.yaml").write_text(text)
+    say(f"config — rollout.yaml re-addressed for containers at {ESTATE / 'rollout.yaml'}")
     return rewritten
 
 
 def render_topology() -> None:
-    proc = run(["docker", "run", "--rm", "-v", f"{ESTATE}:/estate", POLAR_IMAGE,
+    # rendered by the image's own library — the version the rollout server
+    # and the receiver will read it with
+    proc = run(["docker", "run", "--rm", "-v", f"{ESTATE}:/estate",
+                "-e", "GSJ_PINS_PATH=/estate/pins.gsj.json", POLAR_IMAGE,
                 "gsj-rollout", "serve", "--config", "/estate/rollout.yaml",
                 "--render-only"], capture_output=True)
     if proc.returncode != 0:
@@ -970,23 +862,13 @@ def render_topology() -> None:
 
 # --------------------------------------------------------------------- polar
 
-def ensure_sandbox_image() -> None:
-    if ensure_amd64_image(SANDBOX_IMAGE):   # F-54: amd64-only publish, ARM
-        say(f"sandbox — {SANDBOX_IMAGE} pulled (amd64) — episodes run in it")
-        return
-    if run(["docker", "image", "inspect", SANDBOX_IMAGE],
-           capture_output=True).returncode == 0:
-        say(f"sandbox — {SANDBOX_IMAGE} already present")
-        return
-    say(f"sandbox — pulling {SANDBOX_IMAGE} (episodes run in it; pulling now so the "
-        "first episode is not the moment you learn your registry path is broken)")
-    if run(["docker", "pull", SANDBOX_IMAGE]).returncode != 0:
-        die(f"could not pull {SANDBOX_IMAGE}.",
-            "if this host cannot reach ghcr.io, load the image out-of-band "
-            "(docker save/load or skopeo) and re-run — local images are used "
-            "as-is; a `no matching manifest for linux/arm64` error means "
-            "this image has no ARM variant: docker pull --platform "
-            f"linux/amd64 {SANDBOX_IMAGE}")
+def write_polar_env() -> None:
+    WORK.mkdir(exist_ok=True)
+    POLAR_ENV.write_text(f"GSJ_DEMO_WORK={WORK}\n"
+                         f"GSJ_DEMO_SESSIONS={WORK / 'sessions'}\n"
+                         f"GSJ_POLAR_IMAGE={POLAR_IMAGE}\n")
+    for d in (WORK / "sessions", WORK / "traces", ESTATE, ESTATE / "artifacts"):
+        d.mkdir(exist_ok=True)
 
 
 def estate_digest() -> str:
@@ -1008,27 +890,28 @@ def estate_digest() -> str:
 DIGEST_FILE_NAME = ".polar-digest"
 
 
-def polar_up(recreate: bool = False) -> None:
+def polar_up(rec: dict, recreate: bool = False) -> None:
     say("polar — docker compose up (rollout server, gateway, receiver)"
         + (" — generated estate files changed since the last bring-up, so "
            "the three are RECREATED (the receiver reads pins at start — "
            "the archive's mode stamp depends on it)" if recreate else ""))
-    up = ["up", "-d"] + (["--force-recreate"] if recreate else [])         + ["polar-rollout", "polar-gateway", "receiver"]
+    up = ["up", "-d"] + (["--force-recreate"] if recreate else [])
     if run(compose_cmd(*up)).returncode != 0:
         die("`docker compose up` of the Polar services failed.",
             f"the compose error above is authoritative; if the pull failed, load {POLAR_IMAGE} "
             "out-of-band and re-run")
+    ports = rec["ports"]
     code = (
         "import httpx,sys,time\n"
         "deadline=time.time()+60\n"
         "ok_r=ok_g=False\n"
         "while time.time()<deadline and not(ok_r and ok_g):\n"
         "    try:\n"
-        "        h=httpx.get('http://polar-rollout:8080/health',timeout=3).json()\n"
+        f"        h=httpx.get('http://{ROLLOUT_HOST}:{ports['rollout']}/health',timeout=3).json()\n"
         "        ok_r = h.get('status')=='ok' and h.get('nodes',0)>=1\n"
         "    except Exception: pass\n"
         "    try:\n"
-        "        httpx.get('http://receiver:8300/',timeout=3); ok_g=True\n"
+        f"        httpx.get('http://{RECEIVER_HOST}:{ports['receiver']}/',timeout=3); ok_g=True\n"
         "    except Exception: pass\n"
         "    time.sleep(2)\n"
         "print('rollout ok' if ok_r else 'rollout NOT READY',"
@@ -1039,12 +922,16 @@ def polar_up(recreate: bool = False) -> None:
             "and a listening receiver, within 60 s).",
             "docker logs gsj-demo-polar-rollout / gsj-demo-polar-gateway / "
             "gsj-demo-receiver — the gateway registers itself with the rollout server; "
-            "no node usually means the gateway crashed")
+            "no node usually means the gateway crashed (the receiver's log opens with "
+            "the library's `run Polar's two processes yourself` block: not for you — "
+            "those two ARE the containers beside it)")
     say("polar — rollout server reports its gateway node; receiver is listening")
     (ESTATE / DIGEST_FILE_NAME).write_text(estate_digest() + "\n")
 
 
 def check_engine(url: str, model: str) -> str:
+    """The endpoint as a CONTAINER reaches it (the bring-up probed it from
+    the host; the gateway dials it from inside the estate network)."""
     code = (
         "import httpx,sys\n"
         f"r=httpx.get('{url}/v1/models',timeout=10)\n"
@@ -1064,24 +951,38 @@ def check_engine(url: str, model: str) -> str:
 
 # -------------------------------------------------------------------- status
 
-def print_status(demo: dict | None, engine_state: str | None) -> None:
-    ps = run(compose_cmd("ps", "--format",
-                         "table {{.Name}}\t{{.Status}}"), capture_output=True)
+def print_status(demo: "dict | None", engine_state: "str | None",
+                 rec: "dict | None") -> None:
     print("\n== the estate ==")
-    print(ps.stdout.rstrip() or "(nothing running — ./bootstrap.py up)")
-    print(f"""
-in-network URLs (the estate publishes NO host ports; join the network to talk
-to it: docker run --rm --network {NETWORK} <image> ...):
-  forgejo    {FORGEJO_URL}     case repos under /{OWNER}/
-  mcp        {MCP_URL}      retrieval; /health for state
-  rollout    {ROLLOUT_URL}   submit dials this
-  gateway    {GATEWAY_URL}   episodes' OpenAI-compatible proxy
-  receiver   {RECEIVER_URL}   traces land here first
+    for project in (f"gsj-{RUN}", POLAR_PROJECT):
+        ps = run(["docker", "compose", "-p", project, "ps", "--format",
+                  "table {{.Name}}\t{{.Status}}\t{{.Ports}}"], capture_output=True)
+        body = "\n".join(ps.stdout.rstrip().splitlines()[1:])
+        print(body or f"({project}: nothing running — ./bootstrap.py up)")
+    if rec is None:
+        print(f"\n(no bring-up record at {RUNDIR / 'run.json'} — ./bootstrap.py up)")
+    else:
+        fj, mcp, ports = rec["forgejo"], rec["mcp"], rec["ports"]
+        owner = fj["owner"]
+        print(f"""
+the library's bring-up created Forgejo and the retrieval service on 127.0.0.1
+host ports (its own recipe); the Polar leg publishes none. From inside the
+estate network (docker run --rm --network {NETWORK} <image> ...):
+  forgejo    {fj['container_url']}     case repos under /{owner}/   (host: {fj['url']})
+  mcp        {mcp['container_url']}        retrieval; /health for state   (host: {mcp['url']})
+  rollout    http://{ROLLOUT_HOST}:{ports['rollout']}         submit dials this
+  gateway    http://{GATEWAY_HOST}:{ports['gateway']}         episodes' OpenAI-compatible proxy
+  receiver   http://{RECEIVER_HOST}:{ports['receiver']}              traces land here first
 
 on disk (all under {WORK}):
-  secrets/mcp-token-secret        the estate's HMAC secret (chmod 600)
-  secrets/forgejo-token-{OWNER}  the pipeline's push token
-  estate/rollout.yaml             the generated library config
+  runs/{RUN}/.env                 every secret of the estate, KEY='value', mode 0600 — the only
+                                  place a value is written on purpose (the retrieval service's
+                                  clone cache under runs/{RUN}/mcp-data/ also carries the read
+                                  token in its bare clones' config — library wishlist 47 — which
+                                  is why the whole run directory is mode 0700)
+  runs/{RUN}/run.json             the bring-up's record: what it created, every URL, no values
+  runs/{RUN}/rollout.yaml         the bring-up's config (for a host-run Polar; kept as written)
+  estate/rollout.yaml             the same config, re-addressed for the Polar containers
   estate/pins.gsj.json            THIS estate's approved sets (GSJ_PINS_PATH)
   traces/                         validated traces (receiver-side leg)
   sessions/                       per-episode session dirs + agent logs
@@ -1089,9 +990,9 @@ on disk (all under {WORK}):
 stop:      ./bootstrap.py down          (data survives)
 reset:     ./bootstrap.py down --wipe   (deletes {WORK})
 re-run:    ./bootstrap.py up            (idempotent — safe on a running estate)""")
-    if engine_state is not None:
+    if engine_state is not None and demo is not None:
         mark = "ok" if engine_state == "ok" else f"NOT OK — {engine_state}"
-        print(f"\nengine     {demo['inference']['base_url']}  ->  {mark}")
+        print(f"\nengine     {demo['inference']['base_url']}  ->  {mark} (dialed from a container)")
         if engine_state != "ok":
             print("  what to do: the estate stands either way, but episodes need the "
                   "endpoint.\n  Serve the model under EXACTLY the configured name "
@@ -1105,15 +1006,23 @@ the endpoint must satisfy (the library's CP-04' engine legs):
     server's generation defaults ARE the sampling policy — pin them
     (e.g. vLLM --generation-config) or your rollouts sample at whatever
     the engine happens to default to.""")
-        corpus = Path(demo["corpus"]).resolve()
+    if demo is not None and rec is not None:
+        corpus = corpus_path(demo)
+        read_env = rec["forgejo"]["read_token_env"]   # follows the corpus's owner
         print(f"""
-submit one episode (the README's walkthrough reads it afterwards):
-  docker run --rm --network {NETWORK} \\
-    -v {WORK}/estate:/estate -v {corpus}:/corpus \\
-    -e GSJ_PINS_PATH=/estate/pins.gsj.json \\
-    {POLAR_IMAGE} \\
-    gsj-rollout submit --config /estate/rollout.yaml \\
-      --from-bank /corpus/taskbank.parquet --row 0
+submit one episode (the README's walkthrough reads it afterwards). The estate
+requires sign-in for read; submit presents the read token by NAME
+({read_env} — the name follows your corpus's owner) and the value comes from
+the run's .env, sourced inside a subshell so nothing stays exported:
+  ( set -a; . {WORK}/runs/{RUN}/.env; set +a
+    docker run --rm --network {NETWORK} \\
+      -v {WORK}/estate:/estate -v {corpus}:/corpus \\
+      -e GSJ_PINS_PATH=/estate/pins.gsj.json -e {read_env} \\
+      {POLAR_IMAGE} \\
+      gsj-rollout submit --config /estate/rollout.yaml \\
+        --from-bank /corpus/taskbank.parquet --row 0 )
+one episode at a time under a fixed task id (a second concurrent submit is
+refused 409 — add --task-id <another>); ./bootstrap.py status reprints this.
 
 then read it (the receiver archived it under work/traces/):
   ./read.py                      what landed, accepted and quarantined
@@ -1127,9 +1036,7 @@ and before spending episodes on a new endpoint:  ./preflight.py""")
 def cmd_validate(args) -> None:
     check_library()
     demo = load_demo_config(Path(args.config))
-    corpus = (HERE / demo["corpus"]).resolve() if not Path(demo["corpus"]).is_absolute() \
-        else Path(demo["corpus"])
-    phase_validate(corpus)
+    phase_validate(corpus_path(demo))
     say("validate — PASS; the estate is one `./bootstrap.py up` away")
 
 
@@ -1137,72 +1044,76 @@ def cmd_up(args) -> None:
     check_docker()
     check_library()
     demo = load_demo_config(Path(args.config))
-    corpus = (HERE / demo["corpus"]).resolve() if not Path(demo["corpus"]).is_absolute() \
-        else Path(demo["corpus"])
+    corpus = corpus_path(demo)
+    if (WORK / "estate.env").is_file():
+        die(f"{WORK} holds an estate from a bootstrap older than library 0.1.3 "
+            "(work/estate.env) — its layout is not this one's.",
+            "./bootstrap.py down --wipe stops those containers and clears work/; "
+            "then ./bootstrap.py up")
     phase_validate(corpus)
-    check_corpus_yaml(corpus)
-    ids = case_ids(corpus)
+    write_polar_env()
 
-    secret = ensure_secret()
-    write_env_file(secret)   # phase 1: sign-in OFF (the frozen pipeline + a
-                             # cold MCP index read anonymously — see write_env_file)
+    ensure_image(POLAR_IMAGE, "Polar + the library: rollout server, gateway, receiver")
+    ensure_image(MCP_IMAGE, "the retrieval service")
+    sandbox = corpus_sandbox_image(corpus)
+    ensure_image(sandbox, "the per-episode sandbox, from corpus.yaml",
+                 amd64_only=(sandbox == SANDBOX_IMAGE))
 
-    forgejo_up()
-    token = ensure_owner_token()
-    read_token = ensure_read_token()          # CP-56: the sandbox/MCP credential
-    write_env_file(secret, read_token)        # MCP now sees GSJ_FORGEJO_READ_TOKEN
-    pipeline("scaffold", corpus, token, secret)
-
-    write_mcp_config(ids)
-    mcp_up_wait()
-    pipeline("ingest", corpus, token, secret)
-    pipeline("taskbank", corpus, token, secret)
-    pipeline("verify", corpus, token, secret)
-
-    digest_file = ESTATE / DIGEST_FILE_NAME
-    served_digest = digest_file.read_text().strip() if digest_file.is_file() else ""
+    # pins first: the bring-up runs with THIS estate's pins named, and the
+    # endpoint-derived end-of-turn id is one of its answers
     derived_eot = derive_pins(corpus, demo["inference"]["model"],
                               str(demo.get("thinking", "off")),
                               str(demo["inference"]["base_url"]))
-    engine_container_url = write_rollout_yaml(demo, derived_eot, read_token)
-    render_topology()
-    ensure_sandbox_image()
+    answers = write_answers(demo, corpus, derived_eot)
+    forwarded = [f for f in ("--overwrite-repos", "--rebuild", "--retarget")
+                 if getattr(args, f[2:].replace("-", "_"), False)]
+    bringup("up", "--answers", str(answers), "-y", *forwarded)
+    rec = load_run()
+    if rec.get("pins", {}).get("not_in_packaged_pins"):
+        say("pins — the bring-up's G1 WARNING above reads the library's PACKAGED "
+            "approved set; THIS estate validates against work/estate/pins.gsj.json "
+            "(GSJ_PINS_PATH on every leg), which approves every card of your corpus "
+            "— derived above. Nothing quarantines on that account "
+            "(library wishlist 51 (c)).")
 
-    # CP-56: the corpus is scaffolded, the index built, both while read was
-    # anonymous. NOW close anonymous read — a URL-guessing sandbox agent can no
-    # longer re-clone past its cutoff. The MCP holds a warm index (and the read
-    # token for any later fetch); the harness clones with the embedded token.
-    say("forgejo — enabling REQUIRE_SIGNIN_VIEW (CP-56: closing anonymous read)")
-    write_env_file(secret, read_token, signin=True)
-    forgejo_up()   # recreates forgejo with the flipped env + re-waits /healthz
-                   # (which stays anonymous-200 under sign-in — verified CP-56)
-    polar_up(recreate=served_digest != estate_digest())
+    digest_file = ESTATE / DIGEST_FILE_NAME
+    served_digest = digest_file.read_text().strip() if digest_file.is_file() else None
+    engine_container_url = containerize_rollout_yaml(demo, rec)
+    render_topology()
+    polar_up(rec, recreate=served_digest is not None and served_digest != estate_digest())
 
     engine_state = check_engine(engine_container_url, demo["inference"]["model"])
     say(f"up — complete in {time.monotonic() - _T0:.1f}s total")
-    print_status(demo, engine_state)
+    print_status(demo, engine_state, rec)
 
 
 def cmd_status(args) -> None:
     demo = None
-    engine_state = None
     cfg = Path(args.config)
     if cfg.is_file():
         try:
             demo = load_demo_config(cfg)
         except SystemExit:
             demo = None
-    if not ENV_FILE.is_file():
-        write_env_file(os.environ.get("GSJ_MCP_TOKEN_SECRET", "unset"))
-    print_status(demo, engine_state)
+    rec = json.loads((RUNDIR / "run.json").read_text()) if (RUNDIR / "run.json").is_file() else None
+    print_status(demo, None, rec)
 
 
 def cmd_down(args) -> None:
     check_docker()
-    if not ENV_FILE.is_file():
-        # compose interpolation needs the vars even for `down` — synthesize
-        write_env_file("unset")
-    run(compose_cmd("down", "--remove-orphans"))
+    # the Polar leg: by project name, so a half-built work/ still comes down
+    run(["docker", "compose", "-p", POLAR_PROJECT, "down", "--remove-orphans"])
+    say("down — the Polar leg stopped")
+    if RUNDIR.is_dir():
+        check_library()
+        bringup("down", "--name", RUN, *(["--wipe"] if args.wipe else []))
+    else:
+        # no run record (a bring-up that died before writing it, a hand-deleted
+        # work/, or a pre-0.1.3 estate — whose five containers were one compose
+        # project of this same name): the project-name form needs no files
+        run(["docker", "compose", "-p", f"gsj-{RUN}", "down", "--remove-orphans"])
+        run(["docker", "network", "rm", NETWORK], capture_output=True)
+        say(f"down — the {f'gsj-{RUN}'} compose project stopped by name (no run record)")
     say("down — estate stopped (data under work/ survives)")
     if args.wipe:
         say(f"wipe — deleting {WORK}")
@@ -1225,8 +1136,14 @@ def main() -> None:
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("validate", help="check the corpus tree; stand up nothing"
                    ).set_defaults(func=cmd_validate)
-    sub.add_parser("up", help="the whole estate, idempotently"
-                   ).set_defaults(func=cmd_up)
+    up = sub.add_parser("up", help="the whole estate, idempotently")
+    for flag, help_ in (("--overwrite-repos", "forwarded to the bring-up: push over case repos "
+                                              "whose content is not what this corpus builds"),
+                        ("--rebuild", "forwarded to the bring-up: re-embed the retrieval index"),
+                        ("--retarget", "forwarded to the bring-up: let a re-run change the "
+                                       "recorded estate identity")):
+        up.add_argument(flag, action="store_true", help=help_)
+    up.set_defaults(func=cmd_up)
     sub.add_parser("status", help="what is running, where, how to stop"
                    ).set_defaults(func=cmd_status)
     down = sub.add_parser("down", help="stop the estate")
@@ -1234,7 +1151,12 @@ def main() -> None:
                       help="also delete work/ — secrets, data, traces, everything")
     down.set_defaults(func=cmd_down)
     args = ap.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nbootstrap: interrupted — re-run `up`; every phase is idempotent",
+              file=sys.stderr)
+        sys.exit(130)
 
 
 if __name__ == "__main__":

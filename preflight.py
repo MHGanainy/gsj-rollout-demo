@@ -72,7 +72,7 @@ def main() -> int:
         import yaml
     except ImportError:
         print("preflight: PyYAML is missing — pip install "
-              "'gsj-harness-rollout-server>=0.1.2' (it rides the library "
+              "'gsj-harness-rollout-server>=0.1.3' (it rides the library "
               "install)", file=sys.stderr)
         return 1
     cfg_path = Path(args.config)
