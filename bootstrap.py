@@ -286,10 +286,11 @@ def image_present(image: str) -> bool:
 
 
 def ensure_image(image: str, what: str, amd64_only: bool = False) -> None:
-    """Pull every published image up front: the library's bring-up checks
-    that the retrieval and sandbox images are PRESENT and never pulls (the
-    production box cannot), and the first episode must not be the moment
-    you learn your registry path is broken. F-54's cure survives here: an
+    """Pull every published image up front: the first episode must not be
+    the moment you learn your registry path is broken. (The bring-up now
+    pulls a registry reference itself when absent — library CP-62 — but
+    the Polar and sandbox images are this script's to manage, and the
+    pre-pull keeps one progress line per image.) F-54's cure survives here: an
     ARM docker REFUSES a manifest with no arm64 variant instead of
     emulating — pull the amd64 variant explicitly and say so (Docker
     Desktop then runs it under emulation; measured at library CP-36, and

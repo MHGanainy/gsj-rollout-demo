@@ -126,11 +126,14 @@ repo learned that as
   ```bash
   docker pull code.forgejo.org/forgejo/forgejo:16.0.2
   docker tag  code.forgejo.org/forgejo/forgejo:16.0.2 codeberg.org/forgejo/forgejo:16.0.2
-  ./bootstrap.py up            # the bring-up finds the image present and does not pull
+  ./bootstrap.py up            # a CP-62-era bootstrap finds the image present and does not pull
   ```
 
   is byte-identical to what codeberg served (not a re-tag of another
-  version — that would lie about provenance).
+  version — that would lie about provenance). This checkout's bootstrap
+  floors the library at `>=0.1.4` and refuses before the recipe would
+  matter — for it, the upgrade IS the cure; the recipe is for the demo
+  checkout of the same era (`git checkout 13d579e`).
 
 ## What a trajectory looks like
 
