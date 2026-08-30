@@ -56,7 +56,10 @@ repo learned that as
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
   image pulls, then the library's bring-up (Forgejo, the owner and its
   tokens, the scaffold, the retrieval service's first embed — 28 s
-  natively — the taskbank, the round-trip verify — 126 s of it on that run, with Forgejo's first start, the scaffold and the verify running under emulation because its image had to be loaded out-of-band as an amd64 copy (F-78); 42 s with a native Forgejo s of it), then the Polar leg. Warm
+  natively — the taskbank, the round-trip verify — 126 s of it on that run,
+  with Forgejo's first start, the scaffold and the verify running under
+  emulation because its image had to be loaded out-of-band as an amd64
+  copy (F-78); 42 s of it with a native Forgejo), then the Polar leg. Warm
   re-run: **~13 s**; after `down`: ~35 s.
 - **One episode, end to end: ~20–40 s** against a host-local 0.6B engine
   (measured at CP-36: 22.5 s thinking-off, 38.6 s thinking-on; at CP-61,
@@ -95,23 +98,42 @@ repo learned that as
   floor model being itself, honestly rendered: an early smoke episode
   read `AGENTS.md` seventy times and wrote nothing, and the transcript
   collapses the repetition and says NO deliverable was written.
-  Acceptance checks **provenance, not task success**. One more line that
-  is normal: the bring-up prints `pins — WARNING: 1/1 skill card(s) are not
-  in the packaged approved set (G1)` — it checks the library's *packaged*
-  pins, not the ones this script derived for your corpus one step earlier
-  (which approve exactly your cards; library wishlist 51 (c)); episodes on
-  your skill rows are accepted at G1 — the bootstrap says so right after.
-  Likewise its `ports — 8080 is busy on this host; using 8081` lines: the
-  bring-up scans host ports for a Polar it expects on the host; here that
-  leg runs in containers and the chosen number is simply the one they use.
-- **Not normal, and not yours: `docker compose up forgejo` failing with
-  `manifests/sha256:… not found`.** Codeberg's registry lost the platform
-  manifests of `forgejo:16.0.2` — the tag the library's bring-up pins —
-  while still serving its index (measured 2026-08-30: 16.0.1 and 16.0.3
-  pull, 16.0.2 does not; F-78, library wishlist 52). Until the library
-  re-pins, the bring-up's own refusal says what to do: load the image from
-  a host that has it — `docker save codeberg.org/forgejo/forgejo:16.0.2 |
-  ssh <here> docker load` — and re-run `./bootstrap.py up`.
+  Acceptance checks **provenance, not task success**. Two more lines that
+  are normal **with library 0.1.3** (both cured in the library at its CP-62,
+  which ships as 0.1.4): the bring-up prints `pins — WARNING: 1/1 skill
+  card(s) are not in the packaged approved set (G1)` — 0.1.3 checks the
+  library's *packaged* pins, not the ones this script derived for your
+  corpus one step earlier (which approve exactly your cards; library
+  wishlist 51 (c)); episodes on your skill rows are accepted at G1 — the
+  bootstrap says so right after. Likewise its `ports — 8080 is busy on
+  this host; using 8081` lines: 0.1.3 scans host ports for a Polar it
+  expects on the host; here that leg runs in containers and the chosen
+  number is simply the one they use (0.1.4 is told `polar_leg: container`
+  and scans nothing).
+- **Not normal, and not yours: the bring-up refusing at the Forgejo image**
+  — with library 0.1.3, `docker compose up forgejo` failing with
+  `manifests/sha256:… not found`; from 0.1.4, `the Forgejo image … could
+  not be pulled`. Codeberg's registry dropped the platform manifests of
+  `forgejo:16.0.2` — the tag 0.1.3's bring-up pins — while still serving
+  its index (measured 2026-08-30, twice: 16.0.1 and 16.0.3 pull on both
+  platforms, 16.0.2 does not; F-78, library wishlist 52 — closed at library
+  CP-62). **The cure needs no second host**: the Forgejo project's mirror
+  serves the very same image (`code.forgejo.org/forgejo/forgejo:16.0.2` —
+  the same index digest `sha256:2fdfe28b…`, both platforms, measured), so
+
+  ```bash
+  docker pull code.forgejo.org/forgejo/forgejo:16.0.2
+  docker tag  code.forgejo.org/forgejo/forgejo:16.0.2 codeberg.org/forgejo/forgejo:16.0.2
+  ./bootstrap.py up            # the bring-up finds the image present and does not pull
+  ```
+
+  is byte-identical to what codeberg served (not a re-tag of another
+  version — that would lie about provenance). From library 0.1.4 the
+  bring-up pins `16.0.3` (measured pullable) and pulls it itself; if a
+  registry event ever takes that tag too, `./bootstrap.py up
+  --forgejo-image <ref>` names any live reference (the mirror's
+  `code.forgejo.org/forgejo/forgejo:16.0.3`, a `name@sha256:…`), forwarded
+  to the bring-up verbatim.
 
 ## What a trajectory looks like
 

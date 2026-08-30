@@ -693,7 +693,8 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         "name": RUN,
         "forgejo": "create",           # the demo always CREATES its estate
         "mcp": "create",
-        "mcp_image": MCP_IMAGE,        # pulled above — the bring-up checks presence only
+        "mcp_image": MCP_IMAGE,        # pulled above — 0.1.3's bring-up checks presence only
+                                       # (0.1.4 pulls a registry reference itself)
         "engine_url": str(demo["inference"]["base_url"]).rstrip("/"),
         "engine_model": demo["inference"]["model"],
         "thinking": str(demo.get("thinking", "off")),
@@ -702,6 +703,13 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         # estate network here, so the compose DNS name is that address and the
         # bring-up's host-address probe is skipped
         "gateway_host": GATEWAY_HOST,
+        # library >= 0.1.4 (CP-62): Polar's leg runs in containers here, so the
+        # bring-up binds 0.0.0.0 and writes the conventional ports unscanned
+        # instead of scanning HOST ports for a leg that never uses them (its
+        # `8080 is busy on this host; using 8081` line, library wishlist 51 (h));
+        # 0.1.3 ignores the key — containerize_rollout_yaml re-addresses the
+        # same values either way
+        "polar_leg": "container",
     }
     # every harness value is answered on EVERY run — an omitted answer would
     # take the previous run's recorded value, not the library default, and
@@ -740,7 +748,8 @@ def bringup(*args: str) -> None:
     the cwd (0.1.3 has no --runs-dir), so work/runs/demo/ is this estate's
     run directory. GSJ_PINS_PATH names THIS estate's pins — derived before
     the call — which silences the library's import-time packaged-pins
-    warning (its own G1 check still reads the packaged set: see cmd_up).
+    warning (0.1.3's own G1 check still reads the packaged set — see
+    cmd_up; 0.1.4's reads the named one).
     Its closing block prescribes host-run Polar commands; the demo runs
     that leg itself, in containers, right after — so that block (from its
     `next —` line, after the `== run <name> ==` header of 0.1.3) is not
@@ -764,8 +773,8 @@ def bringup(*args: str) -> None:
             "block above names what it found, what it expected, and what to do.",
             f"fix what it names and re-run ./bootstrap.py {verb} — every phase is "
             "idempotent. If it names a bring-up flag this script does not pass "
-            "(--overwrite-repos, --rebuild, --retarget are forwarded from "
-            "./bootstrap.py up; others are not), either pass one of those, run "
+            "(--overwrite-repos, --rebuild, --retarget and --forgejo-image <ref> are "
+            "forwarded from ./bootstrap.py up; others are not), either pass one of those, run "
             "`./bootstrap.py down --wipe` for a fresh estate, or run the tool "
             "directly: python -m gsj_rollout.bringup up --help")
 
@@ -1040,9 +1049,25 @@ def cmd_validate(args) -> None:
     say("validate — PASS; the estate is one `./bootstrap.py up` away")
 
 
+def check_forgejo_image_flag(args) -> None:
+    """0.1.3's bring-up has no --forgejo-image: refuse before any image is
+    pulled, not through its argparse after the pulls (library CP-62)."""
+    if not getattr(args, "forgejo_image", None):
+        return
+    from importlib.util import find_spec
+    src = Path(find_spec("gsj_rollout.bringup").origin).read_text()
+    if "--forgejo-image" not in src:
+        die("--forgejo-image needs the library's bring-up from 0.1.4 (CP-62); the "
+            "installed one has no such flag.",
+            "pip install --upgrade 'gsj-harness-rollout-server>=0.1.4' — or, with 0.1.3, "
+            "the README's 'Not normal' recipe (pull the mirror's digest-equal 16.0.2 "
+            "and tag it as codeberg's) and ./bootstrap.py up without the flag")
+
+
 def cmd_up(args) -> None:
     check_docker()
     check_library()
+    check_forgejo_image_flag(args)
     demo = load_demo_config(Path(args.config))
     corpus = corpus_path(demo)
     if (WORK / "estate.env").is_file():
@@ -1067,8 +1092,17 @@ def cmd_up(args) -> None:
     answers = write_answers(demo, corpus, derived_eot)
     forwarded = [f for f in ("--overwrite-repos", "--rebuild", "--retarget")
                  if getattr(args, f[2:].replace("-", "_"), False)]
+    if args.forgejo_image:
+        # the route around a registry event (library >= 0.1.4, CP-62): the
+        # bring-up's own pin is a tag on codeberg, and a tag's platform
+        # manifests can vanish under it (F-78) — the value is any pullable
+        # reference (check_forgejo_image_flag refused a 0.1.3 library up top)
+        forwarded += ["--forgejo-image", args.forgejo_image]
     bringup("up", "--answers", str(answers), "-y", *forwarded)
     rec = load_run()
+    # library 0.1.3 only: its G1 check read the PACKAGED set regardless of
+    # GSJ_PINS_PATH (wishlist 51 (c)); 0.1.4's reads the named one and the
+    # record key below is gone, so this line no longer prints
     if rec.get("pins", {}).get("not_in_packaged_pins"):
         say("pins — the bring-up's G1 WARNING above reads the library's PACKAGED "
             "approved set; THIS estate validates against work/estate/pins.gsj.json "
@@ -1143,6 +1177,10 @@ def main() -> None:
                         ("--retarget", "forwarded to the bring-up: let a re-run change the "
                                        "recorded estate identity")):
         up.add_argument(flag, action="store_true", help=help_)
+    up.add_argument("--forgejo-image", metavar="REF",
+                    help="forwarded to the bring-up (library >= 0.1.4): the Forgejo image, "
+                         "any pullable reference — the route around a registry that lost "
+                         "the pinned tag's manifests (F-78; README 'Not normal')")
     up.set_defaults(func=cmd_up)
     sub.add_parser("status", help="what is running, where, how to stop"
                    ).set_defaults(func=cmd_status)
