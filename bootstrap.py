@@ -48,7 +48,7 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
@@ -57,7 +57,8 @@ HERE = Path(__file__).resolve().parent
 POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3"
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.4.0"       # multi-arch since library CP-61
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 only (F-54)
-LIB_MIN = (0, 1, 3)          # first wheel that ships the bring-up (gsj_rollout.bringup)
+LIB_MIN = (0, 1, 4)          # the floor: the bring-up that pulls its images and takes
+                             # --forgejo-image / --polar-leg / --runs-dir (library CP-62)
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -136,14 +137,14 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates the packaged bring-up "
-            "(gsj_rollout.bringup, 0.1.3).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.3' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.4 is "
+            "the bring-up that pulls its images and takes --forgejo-image (library CP-62).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.4' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -152,7 +153,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.bringup") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the bring-up, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -470,20 +471,20 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.3' (0.1.3 is the first "
-            "wheel that carries it)")
+            "pip install -U 'gsj-harness-rollout-server>=0.1.4' (the capture ships "
+            "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
     if hashlib.sha256(ref_prompt).hexdigest() not in approved:
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.3') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.4') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "
@@ -693,8 +694,8 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         "name": RUN,
         "forgejo": "create",           # the demo always CREATES its estate
         "mcp": "create",
-        "mcp_image": MCP_IMAGE,        # pulled above — 0.1.3's bring-up checks presence only
-                                       # (0.1.4 pulls a registry reference itself)
+        "mcp_image": MCP_IMAGE,        # pre-pulled above for the progress line — the
+                                       # bring-up pulls a registry ref when absent anyway
         "engine_url": str(demo["inference"]["base_url"]).rstrip("/"),
         "engine_model": demo["inference"]["model"],
         "thinking": str(demo.get("thinking", "off")),
@@ -703,12 +704,11 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         # estate network here, so the compose DNS name is that address and the
         # bring-up's host-address probe is skipped
         "gateway_host": GATEWAY_HOST,
-        # library >= 0.1.4 (CP-62): Polar's leg runs in containers here, so the
+        # library CP-62: Polar's leg runs in containers here, so the
         # bring-up binds 0.0.0.0 and writes the conventional ports unscanned
         # instead of scanning HOST ports for a leg that never uses them (its
         # `8080 is busy on this host; using 8081` line, library wishlist 51 (h));
-        # 0.1.3 ignores the key — containerize_rollout_yaml re-addresses the
-        # same values either way
+        # containerize_rollout_yaml re-addresses the same values either way
         "polar_leg": "container",
     }
     # every harness value is answered on EVERY run — an omitted answer would
@@ -743,16 +743,17 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
 
 
 def bringup(*args: str) -> None:
-    """The library's own bring-up (0.1.3 ships it as gsj_rollout.bringup),
-    run as a subprocess from work/: its runs land under ./runs/<name>/ of
-    the cwd (0.1.3 has no --runs-dir), so work/runs/demo/ is this estate's
-    run directory. GSJ_PINS_PATH names THIS estate's pins — derived before
-    the call — which silences the library's import-time packaged-pins
-    warning (0.1.3's own G1 check still reads the packaged set — see
-    cmd_up; 0.1.4's reads the named one).
+    """The library's own bring-up (gsj_rollout.bringup, in the wheel since
+    0.1.3), run as a subprocess from work/: its runs land under
+    ./runs/<name>/ of the cwd — the demo keeps that default (0.1.4 grew
+    --runs-dir; the cwd shape needs no flag), so work/runs/demo/ is this
+    estate's run directory. GSJ_PINS_PATH names THIS estate's pins —
+    derived before the call — which silences the library's import-time
+    packaged-pins warning; the bring-up's own G1 check reads the same
+    named set.
     Its closing block prescribes host-run Polar commands; the demo runs
     that leg itself, in containers, right after — so that block (from its
-    `next —` line, after the `== run <name> ==` header of 0.1.3) is not
+    `next —` line, after the `== run <name> ==` header) is not
     echoed."""
     env = {**scrubbed_env(), "GSJ_PINS_PATH": str(ESTATE / "pins.gsj.json")}
     verb = args[0]
@@ -1049,25 +1050,9 @@ def cmd_validate(args) -> None:
     say("validate — PASS; the estate is one `./bootstrap.py up` away")
 
 
-def check_forgejo_image_flag(args) -> None:
-    """0.1.3's bring-up has no --forgejo-image: refuse before any image is
-    pulled, not through its argparse after the pulls (library CP-62)."""
-    if not getattr(args, "forgejo_image", None):
-        return
-    from importlib.util import find_spec
-    src = Path(find_spec("gsj_rollout.bringup").origin).read_text()
-    if "--forgejo-image" not in src:
-        die("--forgejo-image needs the library's bring-up from 0.1.4 (CP-62); the "
-            "installed one has no such flag.",
-            "pip install --upgrade 'gsj-harness-rollout-server>=0.1.4' — or, with 0.1.3, "
-            "the README's 'Not normal' recipe (pull the mirror's digest-equal 16.0.2 "
-            "and tag it as codeberg's) and ./bootstrap.py up without the flag")
-
-
 def cmd_up(args) -> None:
     check_docker()
     check_library()
-    check_forgejo_image_flag(args)
     demo = load_demo_config(Path(args.config))
     corpus = corpus_path(demo)
     if (WORK / "estate.env").is_file():
@@ -1093,23 +1078,12 @@ def cmd_up(args) -> None:
     forwarded = [f for f in ("--overwrite-repos", "--rebuild", "--retarget")
                  if getattr(args, f[2:].replace("-", "_"), False)]
     if args.forgejo_image:
-        # the route around a registry event (library >= 0.1.4, CP-62): the
-        # bring-up's own pin is a tag on codeberg, and a tag's platform
-        # manifests can vanish under it (F-78) — the value is any pullable
-        # reference (check_forgejo_image_flag refused a 0.1.3 library up top)
+        # the route around a registry event (library CP-62): the bring-up's
+        # own pin is a tag on codeberg, and a tag's platform manifests can
+        # vanish under it (F-78) — the value is any pullable reference
         forwarded += ["--forgejo-image", args.forgejo_image]
     bringup("up", "--answers", str(answers), "-y", *forwarded)
     rec = load_run()
-    # library 0.1.3 only: its G1 check read the PACKAGED set regardless of
-    # GSJ_PINS_PATH (wishlist 51 (c)); 0.1.4's reads the named one and the
-    # record key below is gone, so this line no longer prints
-    if rec.get("pins", {}).get("not_in_packaged_pins"):
-        say("pins — the bring-up's G1 WARNING above reads the library's PACKAGED "
-            "approved set; THIS estate validates against work/estate/pins.gsj.json "
-            "(GSJ_PINS_PATH on every leg), which approves every card of your corpus "
-            "— derived above. Nothing quarantines on that account "
-            "(library wishlist 51 (c)).")
-
     digest_file = ESTATE / DIGEST_FILE_NAME
     served_digest = digest_file.read_text().strip() if digest_file.is_file() else None
     engine_container_url = containerize_rollout_yaml(demo, rec)
@@ -1178,9 +1152,9 @@ def main() -> None:
                                        "recorded estate identity")):
         up.add_argument(flag, action="store_true", help=help_)
     up.add_argument("--forgejo-image", metavar="REF",
-                    help="forwarded to the bring-up (library >= 0.1.4): the Forgejo image, "
-                         "any pullable reference — the route around a registry that lost "
-                         "the pinned tag's manifests (F-78; README 'Not normal')")
+                    help="forwarded to the bring-up: the Forgejo image, any pullable "
+                         "reference — the route around a registry that lost the pinned "
+                         "tag's manifests (F-78; README 'Historical')")
     up.set_defaults(func=cmd_up)
     sub.add_parser("status", help="what is running, where, how to stop"
                    ).set_defaults(func=cmd_status)

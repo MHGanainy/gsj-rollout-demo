@@ -98,28 +98,30 @@ repo learned that as
   floor model being itself, honestly rendered: an early smoke episode
   read `AGENTS.md` seventy times and wrote nothing, and the transcript
   collapses the repetition and says NO deliverable was written.
-  Acceptance checks **provenance, not task success**. Two more lines that
-  are normal **with library 0.1.3** (both cured in the library at its CP-62,
-  which ships as 0.1.4): the bring-up prints `pins — WARNING: 1/1 skill
-  card(s) are not in the packaged approved set (G1)` — 0.1.3 checks the
-  library's *packaged* pins, not the ones this script derived for your
-  corpus one step earlier (which approve exactly your cards; library
-  wishlist 51 (c)); episodes on your skill rows are accepted at G1 — the
-  bootstrap says so right after. Likewise its `ports — 8080 is busy on
-  this host; using 8081` lines: 0.1.3 scans host ports for a Polar it
-  expects on the host; here that leg runs in containers and the chosen
-  number is simply the one they use (0.1.4 is told `polar_leg: container`
-  and scans nothing).
-- **Not normal, and not yours: the bring-up refusing at the Forgejo image**
-  — with library 0.1.3, `docker compose up forgejo` failing with
-  `manifests/sha256:… not found`; from 0.1.4, `the Forgejo image … could
-  not be pulled`. Codeberg's registry dropped the platform manifests of
-  `forgejo:16.0.2` — the tag 0.1.3's bring-up pins — while still serving
-  its index (measured 2026-08-30, twice: 16.0.1 and 16.0.3 pull on both
-  platforms, 16.0.2 does not; F-78, library wishlist 52 — closed at library
-  CP-62). **The cure needs no second host**: the Forgejo project's mirror
-  serves the very same image (`code.forgejo.org/forgejo/forgejo:16.0.2` —
-  the same index digest `sha256:2fdfe28b…`, both platforms, measured), so
+  Acceptance checks **provenance, not task success**. Two lines you would
+  only ever have seen on a stale library 0.1.3 install (cured at the
+  library's CP-62, shipped in 0.1.4 — this demo's floor): a false `pins —
+  WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
+  (0.1.3 checked the library's *packaged* pins, not the ones this script
+  derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
+  busy on this host; using 8081` (0.1.3 scanned host ports for a Polar
+  that runs in containers here). On 0.1.4 the G1 check reads the named
+  set and `polar_leg: container` scans nothing — neither line prints.
+- **Historical: the bring-up refusing at the Forgejo image** — with
+  library 0.1.3 (the floor before 0.1.4), `docker compose up forgejo`
+  failed with `manifests/sha256:… not found`: codeberg's registry dropped
+  the platform manifests of `forgejo:16.0.2` — the tag 0.1.3's bring-up
+  pins — while still serving its index (measured 2026-08-30, twice;
+  F-78, library wishlist 52 — closed at library CP-62). From 0.1.4 the
+  bring-up pins `16.0.3` (measured pullable) and pulls it itself — a
+  fresh `./bootstrap.py up` needs no mirror step — and if a registry
+  event ever takes that tag too, `./bootstrap.py up --forgejo-image
+  <ref>` names any live reference (the mirror's
+  `code.forgejo.org/forgejo/forgejo:16.0.3`, a `name@sha256:…`),
+  forwarded to the bring-up verbatim. **The cure for anyone still on
+  0.1.3** needs no second host: the Forgejo project's mirror serves the
+  very same image (`code.forgejo.org/forgejo/forgejo:16.0.2` — the same
+  index digest `sha256:2fdfe28b…`, both platforms, measured), so
 
   ```bash
   docker pull code.forgejo.org/forgejo/forgejo:16.0.2
@@ -128,12 +130,7 @@ repo learned that as
   ```
 
   is byte-identical to what codeberg served (not a re-tag of another
-  version — that would lie about provenance). From library 0.1.4 the
-  bring-up pins `16.0.3` (measured pullable) and pulls it itself; if a
-  registry event ever takes that tag too, `./bootstrap.py up
-  --forgejo-image <ref>` names any live reference (the mirror's
-  `code.forgejo.org/forgejo/forgejo:16.0.3`, a `name@sha256:…`), forwarded
-  to the bring-up verbatim.
+  version — that would lie about provenance).
 
 ## What a trajectory looks like
 
@@ -234,7 +231,7 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 # prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.3' pyarrow   # the library + the taskbank's parquet writer
+pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example — or bring your corpus
