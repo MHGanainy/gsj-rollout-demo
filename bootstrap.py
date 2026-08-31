@@ -36,7 +36,6 @@ import argparse
 import hashlib
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -56,7 +55,7 @@ HERE = Path(__file__).resolve().parent
 # ---- the estate's published artifacts, pinned -------------------------------
 POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3"
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.4.0"       # multi-arch since library CP-61
-SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 only (F-54)
+SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
 LIB_MIN = (0, 1, 4)          # the floor: the bring-up that pulls its images and takes
                              # --forgejo-image / --polar-leg / --runs-dir (library CP-62)
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
@@ -269,49 +268,33 @@ def phase_validate(corpus: Path) -> None:
 
 # -------------------------------------------------------------------- images
 
-def daemon_arch() -> str:
-    """The DAEMON's architecture — the one that picks pull platforms. The
-    client python's platform.machine() lies in two real shapes (a Rosetta
-    x86_64 python on an Apple Silicon Mac; Windows-on-ARM reporting 'ARM64'
-    uppercase) and says nothing about a remote DOCKER_HOST; ask docker, fall
-    back to the interpreter only if the daemon is unreachable."""
-    proc = run(["docker", "version", "--format", "{{.Server.Arch}}"],
-               capture_output=True)
-    arch = proc.stdout.strip() if proc.returncode == 0 and proc.stdout else ""
-    return arch or platform.machine().lower()
-
-
 def image_present(image: str) -> bool:
     return run(["docker", "image", "inspect", image], capture_output=True).returncode == 0
 
 
-def ensure_image(image: str, what: str, amd64_only: bool = False) -> None:
+def ensure_image(image: str, what: str) -> None:
     """Pull every published image up front: the first episode must not be
     the moment you learn your registry path is broken. (The bring-up now
     pulls a registry reference itself when absent — library CP-62 — but
     the Polar and sandbox images are this script's to manage, and the
-    pre-pull keeps one progress line per image.) F-54's cure survives here: an
-    ARM docker REFUSES a manifest with no arm64 variant instead of
-    emulating — pull the amd64 variant explicitly and say so (Docker
-    Desktop then runs it under emulation; measured at library CP-36, and
-    since CP-61 only the sandbox image still needs it)."""
+    pre-pull keeps one progress line per image.) F-54's cure lived here
+    until library CP-64: an ARM docker REFUSES a manifest with no arm64
+    variant instead of emulating, and the sandbox image published amd64
+    only, so this function pulled it `--platform linux/amd64` explicitly
+    and said so (measured at library CP-36). Since CP-64 all three
+    published images are two-platform indexes and a plain pull resolves
+    natively everywhere — the fallback is retired."""
     if image_present(image):
         say(f"images — {image} present ({what})")
         return
     say(f"images — pulling {image} ({what})")
     if run(["docker", "pull", image]).returncode == 0:
         return
-    if amd64_only and daemon_arch() in ("arm64", "aarch64"):
-        say(f"arm64 — {image} publishes linux/amd64 only; pulling it explicitly "
-            "for emulation (slower to start; episode speed is unaffected — the "
-            "agent talks to your endpoint over HTTP)")
-        if run(["docker", "pull", "--platform", "linux/amd64", image]).returncode == 0:
-            return
     die(f"could not pull {image} (the docker error above is authoritative).",
         "if this host cannot reach ghcr.io, load the image out-of-band "
-        "(docker save/load or skopeo) and re-run — local images are used as-is"
-        + ("" if amd64_only else "; a `no matching manifest` error would mean the "
-           "registry lost this image's variant for your platform — report it"))
+        "(docker save/load or skopeo) and re-run — local images are used as-is; "
+        "a `no matching manifest` error would mean the registry lost this "
+        "image's variant for your platform — report it")
 
 
 # ---------------------------------------------------------------------- pins
@@ -1067,8 +1050,7 @@ def cmd_up(args) -> None:
     ensure_image(POLAR_IMAGE, "Polar + the library: rollout server, gateway, receiver")
     ensure_image(MCP_IMAGE, "the retrieval service")
     sandbox = corpus_sandbox_image(corpus)
-    ensure_image(sandbox, "the per-episode sandbox, from corpus.yaml",
-                 amd64_only=(sandbox == SANDBOX_IMAGE))
+    ensure_image(sandbox, "the per-episode sandbox, from corpus.yaml")
 
     # pins first: the bring-up runs with THIS estate's pins named, and the
     # endpoint-derived end-of-turn id is one of its answers

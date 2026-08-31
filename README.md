@@ -70,17 +70,19 @@ repo learned that as
   463 turns of `read /workspace` → `EISDIR` before being stopped; the
   receiver quarantined it as `ADM1:status_not_completed`), and that is the
   floor model, not the estate.
-- **Platform fact 1 — Apple Silicon / ARM works, said out loud.** Three
-  of the four images run natively: `gsj-mcp-service:0.4.0` publishes
+- **Platform fact 1 — Apple Silicon / ARM works, said out loud.** All
+  four images run natively: `gsj-mcp-service:0.4.0` publishes
   `linux/amd64` + `linux/arm64` under one tag since library CP-61 (its
   amd64 predecessor ran ~2 min under emulation for the first embed; the
-  native first embed measured 22 s), and `gsj-polar` always did.
-  `gsj-pi-harness` still publishes `linux/amd64` only; an ARM docker
-  refuses a manifest with no matching platform rather than emulating, so
-  the bootstrap pulls it `--platform linux/amd64` explicitly and says so
-  — the per-episode sandbox then runs under emulation, and episode speed
-  is unaffected in practice, since the agent talks to your endpoint over
-  HTTP.
+  native first embed measured 22 s), `gsj-pi-harness:pi0.83.0-3` since
+  library CP-64 (republished as a two-platform index under the same
+  pinned tag, the amd64 child byte-unchanged), and `gsj-polar` always
+  did. History, for anyone reading an old trace: before library CP-64 an
+  ARM docker refused the sandbox's amd64-only manifest rather than
+  emulating (measured at library CP-36, F-54), so the bootstrap pulled it
+  `--platform linux/amd64` explicitly and the per-episode sandbox ran
+  under emulation — episode speed unaffected even then, since the agent
+  talks to your endpoint over HTTP. That cure retired with the arc.
 - **Platform fact 2 — a non-Qwen endpoint works, and the serve argv is
   yours to write.** `up` derives the model-bound pins from your
   endpoint's own template render, automatically; what nobody can derive
@@ -245,9 +247,8 @@ cp config.yaml.example config.yaml   # then fill in the three values:
 ./bootstrap.py up                 # the estate
 ```
 
-**Apple Silicon / ARM**: handled automatically — the one amd64-only image
-(the sandbox) is pulled for emulation and the bootstrap says so (platform
-fact 1 above).
+**Apple Silicon / ARM**: nothing to do — every image pulls natively since
+library CP-64 closed the last amd64-only gap (platform fact 1 above).
 
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → pull the four images → derive
