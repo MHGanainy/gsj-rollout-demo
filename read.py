@@ -748,8 +748,9 @@ FINDING_MEANINGS = [
     ("G3:",
      "the tool roster differs from the pinned one — the agent did not have "
      "the pinned tool surface.",
-     "check that sandbox_image in corpus.yaml is the published harness "
-     "image; a different pi build lands here."),
+     "check that the estate's sandbox image (rollout.yaml's runtime.image — "
+     "the bring-up's sandbox_image answer) is the published harness image; "
+     "a different pi build lands here."),
     ("G5:",
      "the temporal-cutoff evidence failed — checkout pages vs timestep, "
      "branch naming, page contiguity, or a search hit beyond the timestep. "

@@ -23,8 +23,9 @@ served model's name. Everything else about the estate is derived.
 Since library 0.1.3 this script is a READER (library CP-61). The estate
 itself — the git host, the owner and its tokens, the scaffold, the
 retrieval service and its index, the taskbank, the round-trip verify, the
-run record — is stood up by the library's own bring-up, `python -m
-gsj_rollout.bringup` (the production tool, shipped in the wheel): this
+run record — is stood up by the library's own estate tool, `python -m
+gsj_rollout.estate` (the production tool, shipped in the wheel — as
+`gsj_rollout.bringup` on wheels 0.1.3–0.1.5): this
 script maps config.yaml's three values onto that tool's answers and runs
 it. What it adds is exactly what the library's bring-up deliberately stops
 short of: THIS estate's pins, derived from your corpus and your endpoint,
@@ -47,7 +48,7 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
@@ -56,8 +57,9 @@ HERE = Path(__file__).resolve().parent
 POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3"
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.4.0"       # multi-arch since library CP-61
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 4)          # the floor: the bring-up that pulls its images and takes
-                             # --forgejo-image / --polar-leg / --runs-dir (library CP-62)
+LIB_MIN = (0, 1, 6)          # the floor: the first wheel that ships the estate tool as
+                             # gsj_rollout.estate (renamed from gsj_rollout.bringup at
+                             # library CP-72) and the three-field corpus contract (CP-71)
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -136,23 +138,24 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.4 is "
-            "the bring-up that pulls its images and takes --forgejo-image (library CP-62).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.4' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.6 is "
+            "the first wheel with the estate tool as gsj_rollout.estate and the "
+            "three-field corpus contract (library CP-71/CP-72).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.6' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
     from importlib.util import find_spec
     root = Path(find_spec("gsj_rollout").origin).parent
-    if find_spec("gsj_rollout.bringup") is None or not (root / "pins" / "pins.gsj.json").is_file():
+    if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
-            "the bring-up, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (from PyPI, into the "
+            "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
+            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -234,17 +237,6 @@ def corpus_path(demo: dict) -> Path:
     return p if p.is_absolute() else (HERE / p).resolve()
 
 
-def corpus_sandbox_image(corpus: Path) -> str:
-    """The image every task row names (corpus.yaml `sandbox_image`, a
-    contract-required key): the bring-up checks THAT one is present."""
-    doc = yaml.safe_load((corpus / "corpus.yaml").read_text()) or {}
-    image = doc.get("sandbox_image")
-    if not isinstance(image, str) or not image:
-        die(f"{corpus / 'corpus.yaml'} names no sandbox_image.",
-            f"set   sandbox_image: {SANDBOX_IMAGE}   (the published harness image)")
-    return image
-
-
 # ------------------------------------------------------------------ validate
 
 def phase_validate(corpus: Path) -> None:
@@ -256,7 +248,7 @@ def phase_validate(corpus: Path) -> None:
     env = dict(os.environ)
     # the pipeline never consults pins (the warning is about trace gates)
     env["PYTHONWARNINGS"] = "ignore:gsj_rollout.checks"
-    proc = run([sys.executable, "-m", "gsj_rollout.ingest_corpus",
+    proc = run([sys.executable, "-m", "gsj_rollout.estate",
                 "validate", "--corpus", str(corpus)], env=env)
     if proc.returncode != 0:
         die("the corpus tree failed validation — nothing was stood up, nothing runs "
@@ -455,12 +447,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.4' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.6' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -468,7 +460,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.4') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.6') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "
@@ -680,6 +672,8 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         "mcp": "create",
         "mcp_image": MCP_IMAGE,        # pre-pulled above for the progress line — the
                                        # bring-up pulls a registry ref when absent anyway
+        "sandbox_image": SANDBOX_IMAGE,  # the estate's answer (library CP-71): the rows and
+                                         # rollout.yaml's runtime.image, pre-pulled above
         "engine_url": str(demo["inference"]["base_url"]).rstrip("/"),
         "engine_model": demo["inference"]["model"],
         "thinking": str(demo.get("thinking", "off")),
@@ -720,15 +714,15 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         answers["end_of_turn_token_id"] = BuilderConfig().end_of_turn_token_id
     out = WORK / "bringup-answers.yaml"
     out.write_text("# GENERATED by bootstrap.py from config.yaml — the answers handed to\n"
-                   "# `python -m gsj_rollout.bringup up --answers` (no secrets here; the\n"
+                   "# `python -m gsj_rollout.estate up --answers` (no secrets here; the\n"
                    f"# bring-up mints its own into {RUNDIR / '.env'}).\n"
                    + yaml.safe_dump(answers, sort_keys=False))
     return out
 
 
 def bringup(*args: str) -> None:
-    """The library's own bring-up (gsj_rollout.bringup, in the wheel since
-    0.1.3), run as a subprocess from work/: its runs land under
+    """The library's own estate tool (gsj_rollout.estate since 0.1.6 —
+    gsj_rollout.bringup on wheels 0.1.3–0.1.5), run as a subprocess from work/: its runs land under
     ./runs/<name>/ of the cwd — the demo keeps that default (0.1.4 grew
     --runs-dir; the cwd shape needs no flag), so work/runs/demo/ is this
     estate's run directory. GSJ_PINS_PATH names THIS estate's pins —
@@ -741,9 +735,9 @@ def bringup(*args: str) -> None:
     echoed."""
     env = {**scrubbed_env(), "GSJ_PINS_PATH": str(ESTATE / "pins.gsj.json")}
     verb = args[0]
-    say("bring-up — python -m gsj_rollout.bringup " + " ".join(args)
+    say("bring-up — python -m gsj_rollout.estate " + " ".join(args)
         + f"  (the library's production tool; cwd {WORK})")
-    proc = subprocess.Popen([sys.executable, "-m", "gsj_rollout.bringup", *args],
+    proc = subprocess.Popen([sys.executable, "-m", "gsj_rollout.estate", *args],
                             cwd=WORK, env=env, stdout=subprocess.PIPE, text=True, bufsize=1)
     header = muted = False
     for line in proc.stdout:
@@ -761,7 +755,7 @@ def bringup(*args: str) -> None:
             "(--overwrite-repos, --rebuild, --retarget and --forgejo-image <ref> are "
             "forwarded from ./bootstrap.py up; others are not), either pass one of those, run "
             "`./bootstrap.py down --wipe` for a fresh estate, or run the tool "
-            "directly: python -m gsj_rollout.bringup up --help")
+            "directly: python -m gsj_rollout.estate up --help")
 
 
 def scrubbed_env() -> dict:
@@ -1049,8 +1043,11 @@ def cmd_up(args) -> None:
 
     ensure_image(POLAR_IMAGE, "Polar + the library: rollout server, gateway, receiver")
     ensure_image(MCP_IMAGE, "the retrieval service")
-    sandbox = corpus_sandbox_image(corpus)
-    ensure_image(sandbox, "the per-episode sandbox, from corpus.yaml")
+    # the per-episode sandbox is the ESTATE's answer since library CP-71 (a
+    # corpus is not bound to a runtime): the demo names the published harness
+    # image, pre-pulls it, and hands it to the tool as its `sandbox_image`
+    # answer — every task row and rollout.yaml's runtime.image take it
+    ensure_image(SANDBOX_IMAGE, "the per-episode sandbox (the estate's answer)")
 
     # pins first: the bring-up runs with THIS estate's pins named, and the
     # endpoint-derived end-of-turn id is one of its answers

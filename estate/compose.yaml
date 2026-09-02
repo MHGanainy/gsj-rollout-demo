@@ -5,7 +5,7 @@
 #
 # Forgejo and the retrieval service are NOT here since library 0.1.3 (CP-61):
 # `bootstrap.py up` stands them up through the library's own bring-up
-# (`python -m gsj_rollout.bringup`), whose compose project is `gsj-demo`
+# (`python -m gsj_rollout.estate`), whose compose project is `gsj-demo`
 # (containers gsj-demo-forgejo / gsj-demo-mcp, published on 127.0.0.1 host
 # ports of its choosing) and whose docker network is `gsj-demo-net`. This
 # file JOINS that network (external) under its own project name, so the two
@@ -97,7 +97,7 @@ services:
 
 networks:
   default:
-    # the bring-up's network — created by `python -m gsj_rollout.bringup up`
+    # the bring-up's network — created by `python -m gsj_rollout.estate up`
     # (compose project gsj-demo) before this file is ever used
     name: gsj-demo-net
     external: true

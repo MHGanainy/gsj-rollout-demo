@@ -29,25 +29,19 @@ REPO = HERE.parent
 
 CORPUS_YAML = """\
 # The corpus's identity (docs/corpus-contract.md in the library repo).
-# Since library CP-71 a corpus is three fields — name, owner, git: — and
-# the estate values below are DEPRECATED there (forgejo/mcp honored with
-# a warning; sandbox_image IGNORED — a corpus is not bound to a runtime,
-# the rows take the estate's runtime.image). This generator still writes
-# them because the demo pins released wheels (>= 0.1.4), whose pipeline
-# requires them; they leave when the CP-71 release is the floor.
+# Since library CP-71 (wheel 0.1.6 — this demo's floor) a corpus is three
+# fields: name, owner, git:. The git host, the retrieval URL and the sandbox
+# image are the ESTATE's — the estate tool answers them (here: bootstrap.py
+# does, from config.yaml) — not the corpus's; a corpus is not bound to a
+# runtime. Older corpora still carrying forgejo:/mcp:/sandbox_image validate
+# with a deprecation warning, never a failure.
 name: gsj-demo-synthetic
-owner: gsj-staging                    # keep gsj-staging|gsj-prod until the CP-71 release: the installed
-                                      #   wheel's validator (<= 0.1.5) still allowlists them; after it,
-                                      #   any usable Forgejo username (the token env vars derive from it)
-forgejo:
-  base_url: http://gsj-demo-forgejo:3000   # DEPRECATED (the estate's) — in-network DNS, the bring-up's Forgejo
-mcp:
-  url_base: http://gsj-demo-mcp:8790       # DEPRECATED (the estate's) — the bring-up's retrieval
+owner: gsj-staging                    # any usable Forgejo username (library CP-71's shape check);
+                                      #   the token env vars derive from it
 git:                                  # DO NOT CHANGE: fixed identity => deterministic commit SHAs
   name: gsj-demo-fixtures
   email: fixtures@gsj.invalid
   date: "2026-01-01T00:00:00 +0000"
-sandbox_image: ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3   # IGNORED from the CP-71 release (runtime.image is the source); required by <= 0.1.5 wheels
 """
 
 SKILL_BRIEF = """\

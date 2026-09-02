@@ -10,7 +10,7 @@ durable half: the mcp image closed at library CP-61, the sandbox image
 at library CP-64 — the arc is closed), F-69 at
 library CP-40 (the audit's orphan pass). **The F-series is ONE register across both consumer
 repos: a new row, minted from either file, takes the next id after the
-highest anywhere. Next fresh id: F-79.** Severity vocabulary here is
+highest anywhere. Next fresh id: F-80.** Severity vocabulary here is
 CP-36's: blocking / costly / cosmetic / wrong shape, pass-tagged.
 `library-side?` marks the half a demo commit cannot cure.
 

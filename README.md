@@ -102,7 +102,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor until 0.1.6): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -133,7 +133,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.4` and refuses before the recipe would
+  floors the library at `>=0.1.6` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 
@@ -236,7 +236,7 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 # prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.4' pyarrow   # the library + the taskbank's parquet writer
+pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example — or bring your corpus
@@ -253,8 +253,9 @@ library CP-64 closed the last amd64-only gap (platform fact 1 above).
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → pull the four images → derive
 **this estate's pins** from your corpus and your endpoint → hand your three
-values to **the library's own bring-up** (`python -m gsj_rollout.bringup`,
-the production tool the wheel ships since 0.1.3 — the exact answers it gets
+values to **the library's own estate tool** (`python -m gsj_rollout.estate`,
+the production tool the wheel ships since 0.1.3 — as `gsj_rollout.bringup`
+through 0.1.5, renamed at library CP-72 — the exact answers it gets
 are written to `work/bringup-answers.yaml`), which stands up **Forgejo**,
 creates the owner and mints its tokens, **scaffolds** the corpus into
 per-case repos, stands up the **MCP retrieval service** and **ingests**,
