@@ -56,7 +56,7 @@ repo learned that as
   sum to 6.1 GB — the pull transfers less; an earlier README said 3.5 GB —
   that was the compressed estimate, not disk). `work/` after one episode:
   10–14 MB.
-- **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively** — one uninterrupted
+- **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI 40 s, `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
   image pulls, then the library's bring-up (Forgejo, the owner and its
   tokens, the scaffold, the retrieval service's first embed — 28 s
@@ -511,17 +511,51 @@ Editing `AGENTS.md` moves this estate's G2 pin, which is correct and
 expected: `up` re-derives the pin from whatever `AGENTS.md` your corpus
 carries, so the receiver validates episodes against *your* prompt.
 
+**What the reference model actually did, measured.** Do not expect the
+clause to produce citations on its own — it did not here, and the honest
+result is more useful than a promise. Five episodes were run against this
+drop with the clause in the pinned system prompt, all accepted:
+
+| episode | decision hits | `dec:` tokens written | what the agent wrote instead |
+|---|---|---|---|
+| `case_orchard@4`, the precedent prompt | 5 | none | the five doknr in prose, bolded |
+| `case_mill@3`, the precedent prompt | 5 | none | four doknr in prose, with holdings |
+| two earlier runs of the same two rows | 5 and 5 | none | the same |
+| a free prompt spelling out the exact token form | 2 | **one, ungrounded** | `dec:GREV000082013:rn:7` |
+
+So the 0.6B reference model — the demo's floor, untrained on this
+grammar — copies the identifier and drops the syntax. Told the exact form
+in the task prompt, it produces a token and **fabricates the Randnummer**:
+both hits in that episode were section units carrying `rn: null`, whose
+only valid citation is the bare `dec:GREV000082013`, and it invented
+`:rn:7`. That is precisely the failure the degradation rule exists to
+prevent, and `read.py` caught it at the source without being asked:
+
+```
+citations   1 dec: token(s) — 0 grounded, 1 ungrounded; 2 decision hit(s) available
+   dec:GREV000082013:rn:7
+   cites dec:GREV000082013:rn:7 — UNGROUNDED rn — the decision was retrieved
+     (turn 1) but no hit carried rn 7
+```
+
+A stronger model will do better; the point of the demo is that you can
+see which it is, per episode, from the archive alone. Whether a *trained*
+policy follows the rule is an open question in the library's register
+(its wishlist row 70), and it is the reason the grammar is checkable
+rather than merely documented.
+
 **What it costs.** Almost nothing, and the numbers say why the demo can
-afford thirty where a real corpus is a different scale. The drop is 428 KB
-of XML; the retrieval service reads it, parses 312 units out of it (243
+afford thirty where a real corpus is a different scale. The drop is 444 KB
+of XML; the retrieval service reads it, parses **313 units** out of it (244
 Randnummern and 69 whole sections — a Leitsatz, a Tenor, a title line) and
-embeds 313 pieces in about 5 seconds inside the container, which is most
-of the 15 s the whole index build takes; the store on disk grows to 1.8 MB.
-`up` is unchanged in shape and still measured in tens of seconds. For
-comparison, the real corpus the surface was written against is 33,979
-decisions and about 1.16 million pieces — hours, not seconds — which is
-why the library's `--decisions-dir` takes a directory and re-embeds the
-decisions collection alone when the drop changes.
+embeds 317 pieces in about 5 seconds inside the container; the store on
+disk grows to 1.8 MB, and `work/` after two episodes is 10 MB. It costs
+`up` nothing you would notice: the whole from-nothing run below, decisions
+included, was **80 s**. For comparison, the real corpus the surface was
+written against is 33,979 decisions and about 1.16 million pieces — hours,
+not seconds — which is why the library's `--decisions-dir` takes a
+directory and re-embeds the decisions collection alone when the drop
+changes.
 
 ## Both modes
 

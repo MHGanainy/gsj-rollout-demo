@@ -59,8 +59,14 @@ writing them found.** The library's decisions surface (its
 `rii-dok v1` XML as Randnummern; the demo now generates thirty such
 decisions beside its corpus, carries the §9.5 citation clause in its
 `AGENTS.md`, and renders decision hits and `dec:` citations properly in
-`./read.py`. Two episodes were collected against them (library CP-81's
-report has the transcripts). While the decisions were being written and
+`./read.py`. Five episodes were collected against them, all accepted:
+with the clause in the pinned prompt and a natural precedent task the
+0.6B reference model searched, named the decisions by bare doknr in prose
+and wrote **no** `dec:` token in four of them; told the exact token form
+in the task prompt it wrote one and **fabricated the Randnummer** on hits
+that carried none, which `read.py` reported as ungrounded at the source
+(the README's "Decisions" section has the table and the transcript).
+While the decisions were being written and
 reviewed against `case_orchard`, a reviewer reading the case file as a
 lawyer would found that the case file's own geometry contradicted itself —
 F-80, fixed at the same commit.
