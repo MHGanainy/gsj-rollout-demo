@@ -9,7 +9,11 @@ agent in an isolated sandbox with temporally-scoped retrieval, and emits a
 training-ready trajectory. You bring three things — documents in the
 contract's shape, a `config.yaml` naming your inference endpoint, and that
 endpoint itself; one command derives everything else and stands the estate
-up, and one submit later you are reading what the agent did in it:
+up, and one submit later you are reading what the agent did in it. Since
+library CP-81 the worked example also brings **thirty decisions** — court
+decisions written to bear on its two cases, in the XML the library's
+decisions surface parses — so the agent's second retrieval tool returns
+precedent worth citing, and the transcript shows whether it cited:
 
 ```
  you bring                     one command                     what you get
@@ -71,8 +75,9 @@ repo learned that as
   receiver quarantined it as `ADM1:status_not_completed`), and that is the
   floor model, not the estate.
 - **Platform fact 1 — Apple Silicon / ARM works, said out loud.** All
-  four images run natively: `gsj-mcp-service:0.4.0` publishes
-  `linux/amd64` + `linux/arm64` under one tag since library CP-61 (its
+  four images run natively: `gsj-mcp-service` publishes
+  `linux/amd64` + `linux/arm64` under one tag since library CP-61's 0.4.0
+  (this checkout pins `0.5.0`, the decisions surface — library CP-79; its
   amd64 predecessor ran ~2 min under emulation for the first embed; the
   native first embed measured 22 s), `gsj-pi-harness:pi0.83.0-3` since
   library CP-64 (republished as a two-platform index under the same
@@ -102,7 +107,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor until 0.1.6): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -133,7 +138,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.6` and refuses before the recipe would
+  floors the library at `>=0.1.7` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 
@@ -168,7 +173,9 @@ What evidence about the true boundary line between the parcels is in the case fi
       page 2  score 0.52  md/page_0002.md
          ## Page 2 — The 2019 fence survey A survey commissioned jointly in March 2019 and carried out by the public surveyor Lena Ortiz located the registered…
    <- (288 chars)
-      [… the decisions-search hits, trimmed from this excerpt …]
+      [… the decisions-search hits, trimmed here; since CP-81 `show` renders them
+         as what they are — court, docket, Randnummer, the citation each admits —
+         see "Decisions" below …]
 [turn 2]
    - The true boundary line between the parcels is located in **Page 2** of the file.
    - Each piece of evidence points to **Page 2** of the file.
@@ -202,7 +209,8 @@ and that endpoint itself — that is everything; the bootstrap derives the rest.
 A host-local endpoint (`http://127.0.0.1:…`) is fine: the bootstrap rewrites
 it to `host.docker.internal` for the containers and prints the rewrite — on
 Linux the endpoint must then listen beyond loopback (`config.yaml.example`
-says why).
+says why). A **decisions drop** needs no fourth input: put it beside the
+corpus as `<corpus>-decisions/` and `up` finds it ("Decisions" below).
 
 Words this README leans on: the **estate** is the five demo containers on one
 private docker network; **Polar** is the episode runtime the library vendors —
@@ -236,10 +244,11 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 # prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow   # the library + the taskbank's parquet writer
+pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
-./synthetic/make_corpus.py        # the worked example — or bring your corpus
+./synthetic/make_corpus.py        # the worked example: the corpus AND the thirty
+                                  # decisions beside it — or bring your corpus
 cp config.yaml.example config.yaml   # then fill in the three values:
                                      # corpus, inference.base_url, inference.model
 
@@ -253,12 +262,15 @@ library CP-64 closed the last amd64-only gap (platform fact 1 above).
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → pull the four images → derive
 **this estate's pins** from your corpus and your endpoint → hand your three
-values to **the library's own estate tool** (`python -m gsj_rollout.estate`,
+values — and the decisions drop beside your corpus, if there is one, as
+`--decisions-dir` — to **the library's own estate tool** (`python -m gsj_rollout.estate`,
 the production tool the wheel ships since 0.1.3 — as `gsj_rollout.bringup`
 through 0.1.5, renamed at library CP-72 — the exact answers it gets
 are written to `work/bringup-answers.yaml`), which stands up **Forgejo**,
 creates the owner and mints its tokens, **scaffolds** the corpus into
-per-case repos, stands up the **MCP retrieval service** and **ingests**,
+per-case repos, stands up the **MCP retrieval service** (printing the
+retrieval config — the decisions line names your drop — before anything
+is embedded) and **ingests** the cases and the decisions,
 builds the **taskbank**, **verifies** everything round-trip, and writes its
 run record → re-address its `rollout.yaml` for containers and stand up
 **Polar** (rollout server, gateway, receiver —
@@ -333,35 +345,45 @@ generation config IS your sampling policy — pi sends no sampling parameters.
 
 **1 — submit one episode** (the `up` printout's one-liner, with `--row 1`:
 the taskbank the bring-up built from your corpus — the printout's taskbank
-line says how many rows yours produced; the synthetic corpus makes 4
-rows, numbered 0–3, and row 1 is the transcript shown above). The estate requires sign-in for read (a sandbox
-agent cannot re-clone a case past its cutoff), so the generated config
-names the read-scoped token by *variable* (`estate.clone_credential_env`)
-and `submit` presents its value — which lives only in the bring-up's
-`.env`, so source that first; the token never reaches a trace:
+line says how many rows yours produced; the synthetic corpus makes
+six rows, numbered 0–5, sorted by case, timestep and prompt id, and **row 2**
+is the transcript shown above; rows 0 and 4 are the two precedent prompts of
+"Decisions" below, and rows 1 and 5 are the skill-card tasks the 0.6B floor
+model is apt to loop on). The estate requires sign-in for read (a sandbox agent cannot
+re-clone a case past its cutoff), so the generated config names the
+read-scoped token by *variable* (`estate.clone_credential_env`) and
+`submit` presents its value. Since library 0.1.7 — the version inside this
+checkout's `gsj-polar` image — `submit` reads that value from the `.env`
+beside its config when the variable is not exported, so the run's `.env`
+is mounted read-only beside `/estate/rollout.yaml` and nothing is sourced
+or exported; the token never reaches a trace:
 
 ```bash
-( set -a; . work/runs/demo/.env; set +a      # the estate's secrets, into a SUBSHELL only
-  docker run --rm --network gsj-demo-net \
-    -v "$PWD/work/estate:/estate" -v "$PWD/corpus-synthetic:/corpus" \
-    -e GSJ_PINS_PATH=/estate/pins.gsj.json -e GSJ_FORGEJO_READ_TOKEN_GSJ_STAGING \
-    ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3 \
-    gsj-rollout submit --config /estate/rollout.yaml \
-      --from-bank /corpus/taskbank.parquet --row 1 )
+docker run --rm --network gsj-demo-net \
+  -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
+  -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.7 \
+  gsj-rollout submit --config /estate/rollout.yaml \
+    --from-bank /corpus/taskbank.parquet --row 1
 ```
 
 (The token variable's name follows your corpus's `owner:` —
 `GSJ_FORGEJO_READ_TOKEN_<OWNER>`; the `up` printout and `./bootstrap.py
 status` print the recipe with yours, and `estate.clone_credential_env` in
-`work/estate/rollout.yaml` names it. The subshell matters: `set -a` exports
-all five estate secrets, and a value left exported in your shell would beat
-the run's `.env` in compose's interpolation on a later `up`.)
+`work/estate/rollout.yaml` names it. An exported value still wins over the
+file — the library's rule — which is why the old recipe's subshell
+(`set -a; . work/runs/demo/.env; set +a` around the `docker run`, with `-e
+GSJ_FORGEJO_READ_TOKEN_<OWNER>`) keeps working on this image too; it is
+simply no longer needed. Never leave those secrets exported in your shell:
+a value left there would beat the run's `.env` in compose's interpolation
+on a later `up`.)
 
 (One episode at a time under this one-liner: the client submits every
 task as `gsj-task`, and a second `submit` while the first still runs is
 refused with an opaque `409 Conflict` — pass `--task-id <another>` for a
-concurrent one, or wait. The README's example transcript is row 1,
-`case_orchard@2`; row 0 is the skill-card task the floor model loops on.)
+concurrent one, or wait. The README's example transcript is row 2,
+`case_orchard@2`; rows 1 and 5 are the skill-card tasks the floor model is
+apt to loop on.)
 
 Polar starts a sandboxed episode container, the agent works the task
 against your endpoint and the estate's retrieval, and the finished trace is
@@ -389,6 +411,14 @@ written. Three things it is careful about, because they are the point:
   prints `page N`, and the transcript checks them against the episode's
   timestep on the spot — `all <= timestep 2 (the cutoff holds)`. The
   temporal cutoff is observable per-episode, not asserted.
+- **Decision hits show what they are.** Every `mcp_gsj_search_decisions`
+  hit prints the court, the docket, the date and type, the Randnummer (or
+  the section, for a unit that has none) and the citation the hit admits —
+  `dec:<doknr>:rn:<N>`, or `dec:<doknr>` when there is no `rn` — and every
+  `dec:` token the agent writes is checked against the session's own hits
+  on the spot: `grounded` or `UNGROUNDED`, per token, beside the turn that
+  wrote it; the header's `citations` line sums it up (and says NONE when
+  hits were available and nothing was cited).
 - **Thinking is rendered distinguishably** (the `|`-prefixed block inside
   the turn). The archive stores reasoning only inside the token arrays, so
   `show` decodes them — that needs `pip install tokenizers` and the served
@@ -408,6 +438,90 @@ the archive already holds them verbatim).
 
 Neither view adds anything: everything both show comes from the one
 archived JSON the receiver wrote. The archive is the truth; these are views.
+
+## Decisions
+
+The estate's agent has two retrieval tools. `mcp_gsj_search_case` searches
+*this* case's pages and is scoped by the episode's cutoff.
+`mcp_gsj_search_decisions` searches **court decisions** — precedent, the
+same for every case, not cutoff-scoped. The worked example brings thirty
+of them:
+
+```
+./synthetic/make_corpus.py        # writes corpus-synthetic/ AND corpus-synthetic-decisions/
+```
+
+**What they are.** Thirty fictional decisions of two invented courts of
+an invented district — the Landgericht and Oberlandesgericht Grevenau,
+2009 to 2024 — in
+[rii-dok v1](https://www.rechtsprechung-im-internet.de/), the XML the
+German judiciary publishes its decisions in and the format the library's
+[decisions surface](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/decisions-surface.md)
+parses: one `jb-<doknr>.xml` per decision, a `doknr` that is its key, and
+the body as `<dl class="RspDL">` rows whose `<a name="rd_N">` anchors are
+the **Randnummern** (the numbered paragraphs a lawyer cites). Made-up
+text, structurally real — the parser walks them exactly as it walks the
+33,979 published Bundesgerichtshof decisions the surface was written
+against, and returns whole Randnummern.
+
+**Why they are worth reading.** They are written *about the demo's own
+cases*: an orchard boundary dispute and a mill lease. So the thirty are
+about easements and rights of way, the land register against a
+long-standing fence, prescriptive possession, the scope of "agricultural
+passage", termination of a commercial lease for arrears, rent reduction
+for a flooded annex, a landlord who defers a repair it owes. A stranger
+who searches for the right of way over the disputed strip gets back
+paragraphs that answer the question — which is the only way to see that
+the tool works.
+
+**How the estate gets them.** No fourth input: the drop sits **beside**
+the corpus as `<corpus>-decisions/`, and `./bootstrap.py up` finds it and
+passes it to the library's bring-up as `--decisions-dir`. It is mounted
+read-only into the retrieval service, which embeds it as its own
+collection — the review the bring-up prints before the embed names your
+drop, and `./bootstrap.py status` prints it afterwards. Beside, not
+inside: the corpus contract has no `decisions/` entry yet, so `validate`
+would refuse one (`bootstrap.py` says so with the `mv` if you try). Bring
+your own by putting rii-dok v1 files there instead; with no drop at all,
+the service serves its thirty synthetic stand-ins and the tool still
+answers.
+
+**Citing one.** The corpus's `AGENTS.md` carries the clause the surface
+asks for (§9.5), so the agent is told the grammar:
+
+```
+- Cite a decision as `dec:<doknr>:rn:<N>` — the hit gives you both:
+  `decision_id` is the doknr, `rn` is the Randnummer (for example
+  `dec:GREV000082013:rn:7`).
+- When the hit carries no `rn` (`rn: null`, or no `rn` key at all), drop the
+  suffix and cite `dec:<doknr>`. Never invent an `rn`, and never cite a
+  decision that no search in this session returned.
+```
+
+The second half is the **degradation rule**, and it is not decoration: a
+hit on a whole section (a Leitsatz, a Tenor) carries `rn: null`, and a
+production service that does not resolve Randnummern at all carries no
+`rn` key — in both cases the suffixed form does not exist, and an agent
+that invents one is fabricating. `./read.py show` checks every `dec:`
+token the agent writes against that session's own hits and marks it
+`grounded` or `UNGROUNDED`, and the header's `citations` line says what
+happened — including `NONE`, when hits were there and nothing was cited.
+
+Editing `AGENTS.md` moves this estate's G2 pin, which is correct and
+expected: `up` re-derives the pin from whatever `AGENTS.md` your corpus
+carries, so the receiver validates episodes against *your* prompt.
+
+**What it costs.** Almost nothing, and the numbers say why the demo can
+afford thirty where a real corpus is a different scale. The drop is 428 KB
+of XML; the retrieval service reads it, parses 312 units out of it (243
+Randnummern and 69 whole sections — a Leitsatz, a Tenor, a title line) and
+embeds 313 pieces in about 5 seconds inside the container, which is most
+of the 15 s the whole index build takes; the store on disk grows to 1.8 MB.
+`up` is unchanged in shape and still measured in tens of seconds. For
+comparison, the real corpus the surface was written against is 33,979
+decisions and about 1.16 million pieces — hours, not seconds — which is
+why the library's `--decisions-dir` takes a directory and re-embeds the
+decisions collection alone when the drop changes.
 
 ## Both modes
 
@@ -470,9 +584,10 @@ belongs: MODEL-SURFACE's "second family, measured" section.
 The corpus is a directory tree in
 [the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md).
 The synthetic corpus is the worked example — `./synthetic/make_corpus.py`
-writes exactly this:
+writes exactly this (and the decisions drop beside it, next section):
 
 ```
+corpus-synthetic-decisions/      # the thirty decisions, jb-<doknr>.xml — BESIDE the corpus ("Decisions" below)
 corpus-synthetic/
 ├── corpus.yaml                  # names the corpus, the git identity, the sandbox image
 ├── AGENTS.md                    # the agent's standing instructions (G2's pin derives from it)

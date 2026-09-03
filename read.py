@@ -34,6 +34,17 @@ DEFAULT_DIR = HERE / "work" / "traces"
 # tokenizer; these only decide whether to say "thinking present, not shown".
 QWEN_THINK, QWEN_ENDTHINK = 151667, 151668
 
+# The decisions-citation grammar (the library's docs/decisions-surface.md
+# §9.1 — its one regular expression, verbatim): `dec:<doknr>` names a whole
+# decision, `dec:<doknr>:rn:<N>` one Randnummer of it. A token is grounded
+# (§9.4) iff a `search_decisions` hit in the SAME session carried that
+# decision_id and — when suffixed — that rn; the bare form is valid for any
+# retrieved decision (§9.2 rule 5). Nothing here scores; the transcript
+# shows each token as what it is.
+DEC_RE = re.compile(r"(?<![A-Za-z0-9_])dec:([A-Z]{4}[0-9]{9})"
+                    r"(?::rn:([1-9][0-9]*))?(?![A-Za-z0-9_]|:rn)")
+DOKNR_RE = re.compile(r"[A-Z]{4}[0-9]{9}")
+
 
 def die(what: str, fix: str) -> None:
     print(f"read.py: FAIL — {what}", file=sys.stderr)
@@ -271,10 +282,133 @@ def parse_hits(content: str):
     return hits or None
 
 
+def parse_decisions(content: str):
+    """A `search_decisions` result. Since the library's retrieval service
+    0.5.0 (level 2 of docs/decisions-surface.md) it is ONE json object
+    {query, k, hits, index_commit} whose hits carry decision_id, court,
+    date, doktyp, aktenzeichen, rn (integer, or null for a section unit),
+    section, score, text, excerpt; before that, concatenated level-0
+    objects {decision_id, court, year, score, text}. -> (envelope|None,
+    hits), or None if not that shape (CP-76 measured: parse_hits returned
+    None for these, and the transcript showed a raw clip)."""
+    try:
+        obj = json.loads(content)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict) and isinstance(obj.get("hits"), list):
+        return obj, [h for h in obj["hits"] if isinstance(h, dict)]
+    decoder, idx, hits = json.JSONDecoder(), 0, []
+    while idx < len(content):
+        while idx < len(content) and content[idx] in " \n\r\t":
+            idx += 1
+        if idx >= len(content):
+            break
+        try:
+            o, idx = decoder.raw_decode(content, idx)
+        except ValueError:
+            return None
+        if not (isinstance(o, dict) and "decision_id" in o):
+            return None
+        hits.append(o)
+    return (None, hits) if hits else None
+
+
+def cite_forms(hit: dict) -> list:
+    """The citation token(s) a hit admits (spec §9.2): the suffixed form
+    when the hit carries an integer rn, and the bare form always — or
+    nothing when decision_id is not a doknr (a consumer must not cut it to
+    shape)."""
+    did = str(hit.get("decision_id", ""))
+    if not DOKNR_RE.fullmatch(did):
+        return []
+    rn = hit.get("rn")
+    forms = [f"dec:{did}"]
+    if isinstance(rn, int) and not isinstance(rn, bool) and rn >= 1:
+        forms.insert(0, f"dec:{did}:rn:{rn}")
+    return forms
+
+
+def decision_context(trace: dict) -> dict:
+    """What the session could cite: every citation form each decisions
+    hit admitted, keyed to the first turn that carried it; how many hits
+    arrived; whether a decisions search happened at all."""
+    available, n_hits, searched = {}, 0, False
+    for k, turn in enumerate(turns_of(trace)):
+        calls = [call_fn(tc).get("name", "") for tc in turn["msg"].get("tool_calls") or []]
+        for i, r in enumerate(turn["results"]):
+            name = calls[i] if i < len(calls) else ""
+            if name != "mcp_gsj_search_decisions":
+                continue
+            searched = True
+            parsed = parse_decisions(content_text(r.get("content")))
+            for h in (parsed[1] if parsed else []):
+                n_hits += 1
+                for form in cite_forms(h):
+                    available.setdefault(form, k + 1)
+    return {"available": available, "hits": n_hits, "searched": searched}
+
+
+def citations_in(text: str, ctx: dict, turn_no) -> list:
+    """Every dec: token in `text`, with its grounding verdict (spec §9.4):
+    grounded iff a hit carried exactly that form, in this turn or earlier."""
+    out = []
+    for m in DEC_RE.finditer(text or ""):
+        token, bare = m.group(0), f"dec:{m.group(1)}"
+        at = ctx["available"].get(token)
+        if at is not None and (turn_no is None or at <= turn_no):
+            verdict = f"grounded (a hit in turn {at} carried it)"
+        elif m.group(2) and ctx["available"].get(bare) is not None:
+            verdict = (f"UNGROUNDED rn — the decision was retrieved (turn "
+                       f"{ctx['available'][bare]}) but no hit carried rn {m.group(2)}")
+        else:
+            verdict = "UNGROUNDED — no search_decisions hit in this session carried it"
+        out.append((token, at is not None and (turn_no is None or at <= turn_no), verdict))
+    return out
+
+
+def render_decisions(envelope, hits: list, full: bool) -> list:
+    """A decisions result as the surface defines it: the court, the docket,
+    the date and type, the Randnummer (or the section, for a unit without
+    one), the score, and the citation the hit admits — then the best piece."""
+    k = envelope.get("k") if envelope else None
+    index = str((envelope or {}).get("index_commit") or "")
+    lines = [f"   <- {len(hits)} decision hit(s)"
+             + (f", k {k}" if k is not None else "")
+             + (f", index {index[:12]}…" if index else "")
+             + " — precedent, not the case file: the cutoff does not apply"]
+    for h in hits:
+        forms = cite_forms(h)
+        cite = forms[0] if forms else f"decision_id {h.get('decision_id')!r} — not a citable doknr"
+        when = h.get("date") or h.get("year") or "?"
+        rn, section = h.get("rn"), h.get("section")
+        if "rn" in h:
+            unit = (f"Rn {rn} ({section})" if isinstance(rn, int)
+                    else f"{section} — a section unit, no rn: cite the bare form")
+        else:
+            unit = "no rn on this hit (level 1): cite the bare form"
+        try:
+            score = f"{float(h.get('score')):.2f}"
+        except (TypeError, ValueError):
+            score = "?"
+        lines.append(f"      {cite}")
+        lines.append(f"         {h.get('court', '?')} · {h.get('doktyp', '')} {when}"
+                     f" · {h.get('aktenzeichen', '')} · {unit} · score {score}")
+        body = " ".join(str(h.get("excerpt") or h.get("text", "")).split())
+        body = body if full else (body[:150] + ("…" if len(body) > 150 else ""))
+        lines.append(f"         {body}")
+    return lines
+
+
 def render_result(name: str, content: str, timestep, full: bool) -> list:
     """One tool result, as lines. MCP search hits get the page-aware view —
-    the cutoff is the estate's whole point, so pages are always shown."""
+    the cutoff is the estate's whole point, so pages are always shown; a
+    decisions result gets the surface's view (court, docket, Randnummer,
+    the citation it admits)."""
     lines = []
+    if name == "mcp_gsj_search_decisions":
+        parsed = parse_decisions(content)
+        if parsed:
+            return render_decisions(parsed[0], parsed[1], full)
     hits = parse_hits(content) if name.startswith("mcp_gsj_search") else None
     if hits:
         pages = [h.get("page") for h in hits]
@@ -298,7 +432,7 @@ def render_result(name: str, content: str, timestep, full: bool) -> list:
 
 
 def turn_blocks(trace: dict, decoded: list, timestep, full: bool,
-                no_tok_reason) -> list:
+                no_tok_reason, ctx: "dict | None" = None) -> list:
     """Render every assistant turn; collapse literal repetition honestly.
 
     Each block: (signature, lines). Signature covers the model's action AND
@@ -335,6 +469,12 @@ def turn_blocks(trace: dict, decoded: list, timestep, full: bool,
             lines.extend(render_result("", content, timestep, full))
         if text.strip():
             lines.append(indent(text.strip(), "   "))
+        cited = text
+        for name, args in calls:
+            if name == "write":
+                cited += "\n" + args
+        for token, _, verdict in (citations_in(cited, ctx, k + 1) if ctx else []):
+            lines.append(f"   cites {token} — {verdict}")
         if not lines:
             lines.append("   (an empty assistant turn)")
         signature = (think, text, tuple(calls), tuple(results))
@@ -377,6 +517,41 @@ def find_deliverable(trace: dict):
             if isinstance(args, dict) and "path" in args:
                 best = (args.get("path"), args.get("content", ""), k + 1)
     return best
+
+
+def agent_text(trace: dict) -> str:
+    """Everything the agent WROTE this session: its message content and the
+    arguments of its write calls (never the tool results it read)."""
+    parts = []
+    for turn in turns_of(trace):
+        parts.append(content_text(turn["msg"].get("content")))
+        for tc in turn["msg"].get("tool_calls") or []:
+            if call_fn(tc).get("name") == "write":
+                parts.append(call_fn(tc).get("arguments", ""))
+    return "\n".join(parts)
+
+
+def session_citations(trace: dict, ctx: dict) -> list:
+    """Every dec: token the agent wrote this session — in its messages and
+    in the content of its write calls — with the grounding verdict."""
+    out = []
+    for k, turn in enumerate(turns_of(trace)):
+        text = content_text(turn["msg"].get("content"))
+        for tc in turn["msg"].get("tool_calls") or []:
+            if call_fn(tc).get("name") == "write":
+                text += "\n" + call_fn(tc).get("arguments", "")
+        out.extend(citations_in(text, ctx, k + 1))
+    return out
+
+
+def bare_doknr_mentions(trace: dict) -> int:
+    """Doknr the agent wrote WITHOUT the `dec:` prefix — the near miss worth
+    naming, because it is a different failure from not citing at all: the
+    identifier was copied from a hit and the grammar was not used. Counted
+    over what the agent wrote, never over the tool results it read."""
+    text = agent_text(trace)
+    return sum(1 for m in DOKNR_RE.finditer(text)
+               if text[max(0, m.start() - 4):m.start()] != "dec:")
 
 
 # ----------------------------------------------------------------- headers
@@ -437,6 +612,30 @@ def header_lines(entry, findings, sr, trace) -> list:
                      + (f"written -> {d[0]} (turn {d[2]})" if d else
                         "NONE — no `write` call this session (acceptance "
                         "checks provenance, not task success)"))
+        # CP-81: the decisions-citation line — shown whenever the session
+        # searched decisions or wrote a dec: token, so a reader sees whether
+        # the grammar the AGENTS.md clause teaches was used, either way
+        ctx = decision_context(trace)
+        tokens = session_citations(trace, ctx)
+        if ctx["searched"] or tokens:
+            grounded = sum(1 for _, ok, _ in tokens if ok)
+            hits = f"{ctx['hits']} decision hit(s) available"
+            # whether THIS episode's prompt taught the grammar: the system
+            # prompt embeds the corpus AGENTS.md, so its bytes say
+            sysmsg = next((m for m in trace.get("prompt_messages") or []
+                           if m.get("role") == "system"), None)
+            taught = "dec:<doknr>" in content_text((sysmsg or {}).get("content"))
+            clause = ("the system prompt carries the dec: clause" if taught
+                      else "no dec: clause in the system prompt")
+            bare = bare_doknr_mentions(trace)
+            near = (f"; {bare} doknr written WITHOUT the dec: prefix "
+                    "(named, not cited)" if bare else "")
+            if tokens:
+                lines.append(f"citations   {len(tokens)} dec: token(s) — {grounded} grounded, "
+                             f"{len(tokens) - grounded} ungrounded; {hits}; {clause}{near}")
+            else:
+                lines.append(f"citations   NONE — no dec: token this session; {hits}; "
+                             f"{clause}{near}")
         sysmsg = next((m for m in trace.get("prompt_messages") or []
                        if m.get("role") == "system"), None)
         if sysmsg:
@@ -518,7 +717,8 @@ def cmd_show(args) -> None:
                    "evidence is inconsistent, so nothing was decoded")
 
     print("\n-- the session " + "-" * 54)
-    blocks = turn_blocks(trace, decoded, timestep, args.full, why_not)
+    ctx = decision_context(trace)
+    blocks = turn_blocks(trace, decoded, timestep, args.full, why_not, ctx)
     print_session(blocks)
 
     print("\n-- the deliverable " + "-" * 50)
@@ -527,6 +727,8 @@ def cmd_show(args) -> None:
         path, content, turn_no = deliverable
         print(f"({path}, written at turn {turn_no})\n")
         print(content.rstrip())
+        for token, _, verdict in citations_in(content, ctx, turn_no):
+            print(f"[cites {token} — {verdict}]")
     else:
         # F-66 (CP-36): only skill rows ask for out/<task_id>.md; a free-form
         # row's prompt asked for whatever it asked for — say which this was,
@@ -614,6 +816,8 @@ def cmd_export(args) -> None:
         })
     ws = (trace.get("metadata") or {}).get("gsj_workspace") or {}
     deliverable = find_deliverable(trace)
+    ctx = decision_context(trace)
+    cited = session_citations(trace, ctx)
     out.update({
         "workspace": ws or None,
         "finish_reason": trace.get("finish_reason"),
@@ -635,6 +839,21 @@ def cmd_export(args) -> None:
             "think_tokens_basis": ("qwen marker ids in response_ids"
                                    if model_used.startswith("Qwen")
                                    else "not computed: non-Qwen tokenizer"),
+        },
+        # CP-81: the decisions-citation census (docs/decisions-surface.md
+        # §9.4's grounding, per token; nothing is scored here)
+        "decision_census": {
+            "searched": ctx["searched"],
+            "hits_returned": ctx["hits"],
+            "citable_forms": sorted(ctx["available"]),
+            "tokens_written": [{"token": t, "grounded": ok, "verdict": v}
+                               for t, ok, v in cited],
+            "grounded": sum(1 for _, ok, _ in cited if ok),
+            "ungrounded": sum(1 for _, ok, _ in cited if not ok),
+            "bare_doknr_written": bare_doknr_mentions(trace),
+            "clause_in_system_prompt": "dec:<doknr>" in content_text(
+                next((m for m in trace.get("prompt_messages") or []
+                      if m.get("role") == "system"), {}).get("content")),
         },
         "page_census": {
             "timestep": md.get("timestep"),

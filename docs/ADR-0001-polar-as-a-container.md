@@ -36,8 +36,9 @@ one process per service. What was measured on the built image
   2.13.4 at build time — Polar's bounds are floors, so the build records
   what it resolved). No history, no submodules, no venv.
 - **The wheel gets in from PyPI, pinned** (`gsj-harness-rollout-server==0.1.2`,
-  the release cut for this CP; `==0.1.3` since library CP-61 — the image tag
-  tracks the release, the library's A-28), into the SAME interpreter. `import_path`
+  the release cut for this CP; `==0.1.3` from library CP-61, `==0.1.7` from
+  library CP-81 — the image tag tracks the release, the library's A-28),
+  into the SAME interpreter. `import_path`
   then resolves trivially: `polar.agent.factory` imports
   `gsj_rollout.pi_harness:PiHarness` from shared site-packages —
   measured `issubclass(PiHarness, BaseHarness) == True` with no

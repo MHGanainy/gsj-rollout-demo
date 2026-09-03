@@ -18,7 +18,14 @@ failed twice.
 
 The stranger's three inputs (config.yaml — see config.yaml.example):
 a corpus in the contract's shape, an inference endpoint URL, and the
-served model's name. Everything else about the estate is derived.
+served model's name. Everything else about the estate is derived. A
+DECISIONS DROP — real or synthetic court decisions in rii-dok v1 XML
+(jb-<doknr>.xml; the library's docs/decisions-surface.md) — needs no
+fourth input: put it BESIDE the corpus as <corpus>-decisions/ and `up`
+hands it to the library's bring-up as --decisions-dir (the retrieval
+service then serves Randnummern; without a drop it serves its synthetic
+30). Beside, not inside: the corpus contract admits no decisions/ entry in
+a corpus yet (library wishlist row 73), and `validate` would refuse one.
 
 Since library 0.1.3 this script is a READER (library CP-61). The estate
 itself — the git host, the owner and its tokens, the scaffold, the
@@ -48,18 +55,20 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.3"
-MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.4.0"       # multi-arch since library CP-61
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.7"   # library 0.1.7 inside (CP-81 cut): submit reads the run's .env beside its config
+MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.5.0"       # multi-arch; 0.5.0 = the decisions surface (library CP-79) —
+                                                             # 0.4.x refuses the `decisions.path` key a drop needs (library wishlist 77)
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 6)          # the floor: the first wheel that ships the estate tool as
-                             # gsj_rollout.estate (renamed from gsj_rollout.bringup at
-                             # library CP-72) and the three-field corpus contract (CP-71)
+LIB_MIN = (0, 1, 7)          # the floor: the first wheel whose estate tool takes
+                             # --decisions-dir (library CP-79) and whose submit reads
+                             # the run's .env beside its config (CP-75) — the two
+                             # things this demo's decisions drop and its run book need
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -138,15 +147,16 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.6 is "
-            "the first wheel with the estate tool as gsj_rollout.estate and the "
-            "three-field corpus contract (library CP-71/CP-72).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.6' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.7 is "
+            "the first wheel whose estate tool takes --decisions-dir (the decisions "
+            "drop beside the corpus, library CP-79) and whose submit reads the run's "
+            ".env beside its config (CP-75).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.7' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -155,7 +165,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -237,6 +247,17 @@ def corpus_path(demo: dict) -> Path:
     return p if p.is_absolute() else (HERE / p).resolve()
 
 
+def decisions_drop_for(corpus: Path) -> "tuple[Path, int]":
+    """The drop beside the corpus — <corpus>-decisions/ — and how many .xml
+    files it holds (0 = no drop: the bring-up's answer is then EMPTY, which
+    clears a drop an earlier run recorded, so config.yaml + the tree stay
+    the source of truth). The library's bring-up validates the directory
+    (exists, >= 1 .xml), mounts it read-only and records it in run.json."""
+    drop = corpus.parent / f"{corpus.name}-decisions"
+    n = len(list(drop.glob("*.xml"))) if drop.is_dir() else 0
+    return drop, n
+
+
 # ------------------------------------------------------------------ validate
 
 def phase_validate(corpus: Path) -> None:
@@ -245,6 +266,15 @@ def phase_validate(corpus: Path) -> None:
         die(f"{corpus / 'corpus.yaml'} does not exist — is '{corpus}' a corpus root?",
             "point config.yaml's `corpus:` at a tree in the contract's shape, "
             "or generate the worked example: ./synthetic/make_corpus.py")
+    if (corpus / "decisions").exists():
+        # said here, before the contract's validator says it less helpfully:
+        # the corpus root admits no decisions/ entry yet (library row 73)
+        drop, _ = decisions_drop_for(corpus)
+        die(f"{corpus / 'decisions'} exists, and the corpus contract admits no decisions/ "
+            "entry inside a corpus yet (library wishlist row 73) — validate refuses it.",
+            f"keep the drop BESIDE the corpus: mv {corpus / 'decisions'} {drop}  "
+            "(bootstrap.py finds <corpus>-decisions/ there and passes it to the "
+            "bring-up as --decisions-dir)")
     env = dict(os.environ)
     # the pipeline never consults pins (the warning is about trace gates)
     env["PYTHONWARNINGS"] = "ignore:gsj_rollout.checks"
@@ -447,12 +477,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.6' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.6' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.7' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -460,7 +490,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.6') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.7') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "
@@ -660,7 +690,8 @@ def derive_pins(corpus: Path, model: str, thinking: str,
 
 # --------------------------------------------------- the library's bring-up
 
-def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
+def write_answers(demo: dict, corpus: Path, derived_eot: "int | None",
+                  drop: "Path | None") -> Path:
     """config.yaml's three values, mapped onto the bring-up's answers file
     (keys are its long flag names): everything else it asks — owner,
     create-vs-adopt, ports, embedding identity, chunking — takes the
@@ -688,6 +719,10 @@ def write_answers(demo: dict, corpus: Path, derived_eot: "int | None") -> Path:
         # `8080 is busy on this host; using 8081` line, library wishlist 51 (h));
         # containerize_rollout_yaml re-addresses the same values either way
         "polar_leg": "container",
+        # CP-81: the decisions drop beside the corpus (or "" — an omitted
+        # answer would keep a drop an earlier run recorded; an empty one
+        # clears it), mounted read-only by the bring-up at /app/decisions
+        "decisions_dir": str(drop) if drop else "",
     }
     # every harness value is answered on EVERY run — an omitted answer would
     # take the previous run's recorded value, not the library default, and
@@ -952,12 +987,16 @@ def print_status(demo: "dict | None", engine_state: "str | None",
     else:
         fj, mcp, ports = rec["forgejo"], rec["mcp"], rec["ports"]
         owner = fj["owner"]
+        ddir = ((rec.get("compose") or {}).get("mcp") or {}).get("decisions_dir")
+        decisions = (f"{ddir} (rii-dok v1, served as Randnummern — level 2)" if ddir
+                     else "none — the retrieval service serves its synthetic 30")
         print(f"""
 the library's bring-up created Forgejo and the retrieval service on 127.0.0.1
 host ports (its own recipe); the Polar leg publishes none. From inside the
 estate network (docker run --rm --network {NETWORK} <image> ...):
   forgejo    {fj['container_url']}     case repos under /{owner}/   (host: {fj['url']})
   mcp        {mcp['container_url']}        retrieval; /health for state   (host: {mcp['url']})
+  decisions  {decisions}
   rollout    http://{ROLLOUT_HOST}:{ports['rollout']}         submit dials this
   gateway    http://{GATEWAY_HOST}:{ports['gateway']}         episodes' OpenAI-compatible proxy
   receiver   http://{RECEIVER_HOST}:{ports['receiver']}              traces land here first
@@ -1000,15 +1039,15 @@ the endpoint must satisfy (the library's CP-04' engine legs):
         print(f"""
 submit one episode (the README's walkthrough reads it afterwards). The estate
 requires sign-in for read; submit presents the read token by NAME
-({read_env} — the name follows your corpus's owner) and the value comes from
-the run's .env, sourced inside a subshell so nothing stays exported:
-  ( set -a; . {WORK}/runs/{RUN}/.env; set +a
-    docker run --rm --network {NETWORK} \\
-      -v {WORK}/estate:/estate -v {corpus}:/corpus \\
-      -e GSJ_PINS_PATH=/estate/pins.gsj.json -e {read_env} \\
-      {POLAR_IMAGE} \\
-      gsj-rollout submit --config /estate/rollout.yaml \\
-        --from-bank /corpus/taskbank.parquet --row 0 )
+({read_env} — the name follows your corpus's owner) and reads its VALUE from
+the run's .env, mounted read-only beside the config it reads (library 0.1.7's
+seam, inside this image: read, never exported — no subshell, nothing sourced):
+  docker run --rm --network {NETWORK} \\
+    -v {WORK}/estate:/estate -v {WORK}/runs/{RUN}/.env:/estate/.env:ro \\
+    -v {corpus}:/corpus -e GSJ_PINS_PATH=/estate/pins.gsj.json \\
+    {POLAR_IMAGE} \\
+    gsj-rollout submit --config /estate/rollout.yaml \\
+      --from-bank /corpus/taskbank.parquet --row 0
 one episode at a time under a fixed task id (a second concurrent submit is
 refused 409 — add --task-id <another>); ./bootstrap.py status reprints this.
 
@@ -1054,7 +1093,16 @@ def cmd_up(args) -> None:
     derived_eot = derive_pins(corpus, demo["inference"]["model"],
                               str(demo.get("thinking", "off")),
                               str(demo["inference"]["base_url"]))
-    answers = write_answers(demo, corpus, derived_eot)
+    drop, n_xml = decisions_drop_for(corpus)
+    if n_xml:
+        say(f"decisions — {n_xml} rii-dok v1 file(s) at {drop} → the bring-up's "
+            "--decisions-dir (mounted read-only; the retrieval service serves them "
+            "as Randnummern — its review line below names the drop before the embed)")
+    else:
+        say(f"decisions — no drop at {drop} (a directory of jb-<doknr>.xml beside the "
+            "corpus): the retrieval service serves its synthetic 30; "
+            "./synthetic/make_corpus.py writes the worked example's thirty")
+    answers = write_answers(demo, corpus, derived_eot, drop if n_xml else None)
     forwarded = [f for f in ("--overwrite-repos", "--rebuild", "--retarget")
                  if getattr(args, f[2:].replace("-", "_"), False)]
     if args.forgejo_image:
