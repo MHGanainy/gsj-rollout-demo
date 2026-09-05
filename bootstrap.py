@@ -180,9 +180,12 @@ def load_demo_config(path: Path) -> dict:
         die(f"{path} does not exist.",
             "copy config.yaml.example to config.yaml and fill in the three values")
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
         die(f"{path} is not valid YAML: {exc}", "fix the syntax and re-run")
+    if not isinstance(raw, dict):
+        die(f"{path}: found {type(raw).__name__}; expected a YAML mapping.",
+            "restore a mapping from config.yaml.example and fill in the three values")
     allowed = {"corpus", "inference", "context_window", "max_tokens",
                "end_of_turn_token_id", "thinking", "generation_prompt_glue_ids"}
     unknown = set(raw) - allowed

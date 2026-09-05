@@ -12,7 +12,7 @@ library CP-40 (the audit's orphan pass), F-79 in the examples repo at
 library CP-69, and **F-80 here at library CP-81** (below). **The F-series is ONE register across both consumer
 repos: a new row, minted from either file, takes the next id after the
 highest anywhere. Next fresh id: F-83.** F-81 is the examples' deferred
-training row; F-82 below records this reader's deferred audit findings.
+training row; F-82 below records the reader fixes and remaining capture proof.
 Severity vocabulary here is
 CP-36's: blocking / costly / cosmetic / wrong shape, pass-tagged.
 `library-side?` marks the half a demo commit cannot cure.
@@ -27,7 +27,7 @@ reader behavior or citation reward changed here.
 
 | # | severity | finding | library-side? | status |
 | --- | --- | --- | --- | --- |
-| F-82 | wrong shape (evidence and input recovery; CP-82 audit B13–B15) | Synthetic mutations of real CP-81 traces showed positional result joins misclassifying a valid decision citation when tool results were reversed, and an EACCES write exported/displayed as written. A JSON array archive and scalar YAML config raised tracebacks. These are executed legal-shape/error fixtures, not claims of naturally reordered captures | no — demo reader and bootstrap input boundary | **OPEN, registered at library CP-83 phase 1; implementation remains phase 4.** CP-82's fresh accepted precedent episode returned five hits and no `dec:` token or deliverable; acceptance alone establishes no answer/citation quality. `waiting-on: phase 4 fixtures covering five CP-81 captures, CP-82's fresh capture, reversed/missing results and failed writes, with ID-aware show/export/census agreement, attempted/succeeded/unknown write evidence and file-naming root-shape refusals; phase 6's operator citation-policy truth table before any reward claim` |
+| F-82 | wrong shape (evidence and input recovery; CP-82 audit B13–B15) | Synthetic mutations of real CP-81 traces showed positional result joins misclassifying a valid decision citation when tool results were reversed, and an EACCES write exported/displayed as written. A JSON array archive and scalar YAML config raised tracebacks. These are executed legal-shape/error fixtures, not claims of naturally reordered captures | no — demo reader and bootstrap input boundary | **[CP-86 phase 4] B13–B15 FIXED with regression tests; historical-capture proof PARTIAL.** One ID join drives show/export/census, missing/unmatched/ambiguous results are explicit, writes retain attempts and report succeeded/failed/unknown from results, malformed roots refuse with file/shape/cure. Export v2 documents changed fields. Three original CP-81 stranger bodies and CP-82's fresh body are byte-frozen and replayed; b4422728 remains ungrounded, the other three remain silent with hits available. CP-81 rehearsal bodies dd62726f… and c2aeed8a… were not recovered locally: their historical silence is not claimed as a new reader execution. `waiting-on: recover both original CP-81 rehearsal bodies with provenance and pass corrected-reader fixtures for all five; phase 6 must supply an operator-approved citation-policy truth table before any reward claim` |
 
 **[library CP-43 — 2026-08-24] The audit's demo-side remainder closed**
 in this repo's front-door sitting (the library's `docs/reports/CP-43.md`

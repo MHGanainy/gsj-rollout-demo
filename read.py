@@ -107,12 +107,40 @@ def load(entry: dict) -> tuple:
         die(f"{entry['path']} is not readable JSON: {exc}",
             "the receiver writes archives atomically, so a corrupt file was "
             "corrupted after landing — restore it or delete it")
-    if isinstance(body, dict) and set(body) == {"findings", "session_result"}:
+    def bad(expected):
+        die(f"{entry['path']}: found an invalid archive shape; expected {expected}.",
+            "restore this file from the original receiver archive; preserve the damaged "
+            "copy for inspection, or point --dir at the correct archive")
+    if not isinstance(body, dict):
+        bad("a SessionResult object or findings/session_result wrapper")
+    wrapped = set(body) == {"findings", "session_result"}
+    findings, sr = (body["findings"], body["session_result"]) if wrapped else ([], body)
+    if not isinstance(findings, list) or not all(isinstance(f, str) for f in findings):
+        bad("findings as a list of strings")
+    if not isinstance(sr, dict):
+        bad("session_result as an object")
+    if sr.get("metadata") is not None and not isinstance(sr["metadata"], dict):
+        bad("metadata as an object or null")
+    trajectory = sr.get("trajectory")
+    if trajectory is not None:
+        if not isinstance(trajectory, dict):
+            bad("trajectory as an object or null")
+        if trajectory.get("metadata") is not None and not isinstance(trajectory["metadata"], dict):
+            bad("trajectory.metadata as an object or null")
+        traces = trajectory.get("traces")
+        if traces is not None and (not isinstance(traces, list)
+                                   or not all(isinstance(t, dict) for t in traces)):
+            bad("trajectory.traces as a list of objects or null")
+        for trace in traces or []:
+            for key in ("response_messages", "messages"):
+                value = trace.get(key)
+                if value is not None and (not isinstance(value, list)
+                                          or not all(isinstance(m, dict) for m in value)):
+                    bad(f"{key} as a list of message objects or null")
+    entry["wrapped"] = wrapped
+    if wrapped:
         entry["quarantined"] = True
-        entry["wrapped"] = True         # the FILE's root is the wrapper —
-        return body["findings"], body["session_result"]  # pointers must say so
-    entry["wrapped"] = False
-    return [], body
+    return findings, sr
 
 
 def trace_of(sr: dict):
@@ -139,13 +167,42 @@ def call_fn(tc) -> dict:
 
 
 def turns_of(trace: dict) -> list:
-    """Group response_messages: one assistant turn + its tool results."""
-    turns = []
+    """One ID join for display, export, citation census and write outcomes.
+
+    Never infer identity from position. Duplicate IDs/results are ambiguous;
+    retain their evidence without attributing it to any call. Orphan results
+    are displayed beside the preceding turn (first turn if before it).
+    """
+    turns, calls, results = [], {}, []
     for msg in trace.get("response_messages") or []:
         if msg.get("role") == "assistant":
-            turns.append({"msg": msg, "results": []})
-        elif msg.get("role") == "tool" and turns:
-            turns[-1]["results"].append(msg)
+            turn = {"msg": msg, "tools": []}
+            turns.append(turn)
+            for tc in msg.get("tool_calls") or []:
+                ident = tc.get("id") if isinstance(tc, dict) else None
+                event = {"id": ident, "call": tc, "result": None, "status": "missing"}
+                turn["tools"].append(event)
+                if isinstance(ident, str) and ident:
+                    calls.setdefault(ident, []).append(event)
+        elif msg.get("role") == "tool":
+            results.append((max(0, len(turns)-1), msg))
+    if results and not turns:
+        turns.append({"msg": {}, "tools": []})
+    counts = {}
+    for _, msg in results:
+        ident = msg.get("tool_call_id")
+        if isinstance(ident, str):
+            counts[ident] = counts.get(ident, 0) + 1
+    for at, msg in results:
+        ident = msg.get("tool_call_id")
+        matches = calls.get(ident, []) if isinstance(ident, str) else []
+        if len(matches) == 1 and counts.get(ident) == 1:
+            matches[0].update(result=msg, status="matched", result_turn=at+1)
+        else:
+            for event in matches:
+                event["status"] = "ambiguous"
+            turns[at]["tools"].append({"id": ident, "call": None, "result": msg,
+                                       "status": "ambiguous" if matches else "unmatched", "result_turn": at+1})
     return turns
 
 
@@ -334,17 +391,20 @@ def decision_context(trace: dict) -> dict:
     arrived; whether a decisions search happened at all."""
     available, n_hits, searched = {}, 0, False
     for k, turn in enumerate(turns_of(trace)):
-        calls = [call_fn(tc).get("name", "") for tc in turn["msg"].get("tool_calls") or []]
-        for i, r in enumerate(turn["results"]):
-            name = calls[i] if i < len(calls) else ""
-            if name != "mcp_gsj_search_decisions":
+        for event in turn["tools"]:
+            if call_fn(event["call"]).get("name") != "mcp_gsj_search_decisions":
                 continue
             searched = True
+            r = event["result"]
+            if (event["status"] != "matched" or r.get("isError") is True
+                    or r.get("is_error") is True):
+                continue
             parsed = parse_decisions(content_text(r.get("content")))
             for h in (parsed[1] if parsed else []):
                 n_hits += 1
                 for form in cite_forms(h):
-                    available.setdefault(form, k + 1)
+                    at = max(k + 1, event["result_turn"])
+                    available[form] = min(available.get(form, at), at)
     return {"available": available, "hits": n_hits, "searched": searched}
 
 
@@ -447,12 +507,12 @@ def turn_blocks(trace: dict, decoded: list, timestep, full: bool,
         calls = [(call_fn(tc).get("name", "(unnamed tool call)"),
                   call_fn(tc).get("arguments", ""))
                  for tc in msg.get("tool_calls") or []]
-        results = [content_text(r.get("content")) for r in turn["results"]]
+        results = [json.dumps(e, sort_keys=True) for e in turn["tools"]]
 
         if think:
             lines.append("   thinking:")
             lines.append(indent(clip(think, 700, full), "   | "))
-        elif decoded[k] is None and stamp_thinking and no_tok_reason:
+        elif (k >= len(decoded) or decoded[k] is None) and stamp_thinking and no_tok_reason:
             lines.append(f"   [thinking happened this session but cannot be "
                          f"shown: {no_tok_reason}]")
         for name, args in calls:
@@ -463,10 +523,19 @@ def turn_blocks(trace: dict, decoded: list, timestep, full: bool,
             if not full and len(args_line) > 300:
                 args_line = args_line[:300] + f"… (+{len(args_line) - 300:,} chars)"
             lines.append(f"   -> {name} {args_line}")
-        for (name, _), content in zip(calls, results):
-            lines.extend(render_result(name, content, timestep, full))
-        for content in results[len(calls):]:
-            lines.extend(render_result("", content, timestep, full))
+        for event in turn["tools"]:
+            name = call_fn(event["call"]).get("name", "")
+            label = event["id"] or "(no tool-call id)"
+            if event["status"] != "matched":
+                lines.append(f"   [{event['status']} result: {label}, {name or 'unknown tool'}]")
+            if event["result"] is not None:
+                failed = (event["result"].get("isError") is True
+                          or event["result"].get("is_error") is True)
+                if failed:
+                    lines.append(f"   [failed result: {label}, {name or 'unknown tool'}]")
+                lines.extend(render_result(name if event["status"] == "matched" and not failed else "",
+                                           content_text(event["result"].get("content")),
+                                           timestep, full))
         if text.strip():
             lines.append(indent(text.strip(), "   "))
         cited = text
@@ -477,7 +546,7 @@ def turn_blocks(trace: dict, decoded: list, timestep, full: bool,
             lines.append(f"   cites {token} — {verdict}")
         if not lines:
             lines.append("   (an empty assistant turn)")
-        signature = (think, text, tuple(calls), tuple(results))
+        signature = (think, text, tuple(calls), tuple(results), bool(turn["msg"]))
         blocks.append((signature, lines))
     return blocks
 
@@ -491,7 +560,9 @@ def print_session(blocks: list) -> None:
         while j + 1 < n and blocks[j + 1][0] == blocks[i][0]:
             j += 1
         count = j - i + 1
-        if count >= 3:
+        if not blocks[i][0][-1]:
+            print("[unmatched results — no assistant turn]")
+        elif count >= 3:
             print(f"[turns {i + 1}-{j + 1}] — the next turn repeated {count}x, "
                   f"call and result byte-identical each time:")
         else:
@@ -503,19 +574,39 @@ def print_session(blocks: list) -> None:
 
 
 def find_deliverable(trace: dict):
-    """The last `write` call — the brief asks for out/<task_id>.md. Returns
-    (path, content, turn_no) or None."""
+    """Last write attempt, preserving arguments and the ID-resolved outcome.
+
+    A successful tool acknowledgement is evidence of success at that turn,
+    never a claim that a file still exists. Old archives often omit error
+    flags; recognize the pinned pi acknowledgement, keep other replies unknown.
+    """
     best = None
     for k, turn in enumerate(turns_of(trace)):
-        for tc in turn["msg"].get("tool_calls") or []:
-            if call_fn(tc).get("name") != "write":
+        for event in turn["tools"]:
+            fn = call_fn(event["call"])
+            if fn.get("name") != "write":
                 continue
             try:
-                args = json.loads(call_fn(tc).get("arguments", ""))
-            except ValueError:
-                continue
-            if isinstance(args, dict) and "path" in args:
-                best = (args.get("path"), args.get("content", ""), k + 1)
+                args = json.loads(fn.get("arguments", ""))
+            except (ValueError, TypeError):
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            result = event["result"]
+            content = content_text((result or {}).get("content"))
+            outcome = "unknown"
+            if result is not None and event["status"] == "matched":
+                if (result.get("isError") is True or result.get("is_error") is True
+                        or re.search(r"^(?:EACCES\b|ENOENT\b|EPERM\b|permission denied|Error[: ])",
+                                     content, re.IGNORECASE)):
+                    outcome = "failed"
+                elif re.fullmatch(r"Successfully wrote \d+ bytes to .+", content.strip()):
+                    outcome = "succeeded"
+            best = {"attempted": True, "outcome": outcome,
+                    "written": True if outcome == "succeeded" else False if outcome == "failed" else None,
+                    "path": args.get("path"), "content": args.get("content", ""),
+                    "arguments": fn.get("arguments", ""), "turn": k+1,
+                    "tool_call_id": event["id"], "result": result}
     return best
 
 
@@ -609,7 +700,7 @@ def header_lines(entry, findings, sr, trace) -> list:
         # in the header, beside the fields it corrects.
         d = find_deliverable(trace)
         lines.append("deliverable "
-                     + (f"written -> {d[0]} (turn {d[2]})" if d else
+                     + (f"attempted -> {d['path']} (turn {d['turn']}); {d['outcome']}" if d else
                         "NONE — no `write` call this session (acceptance "
                         "checks provenance, not task success)"))
         # CP-81: the decisions-citation line — shown whenever the session
@@ -724,8 +815,8 @@ def cmd_show(args) -> None:
     print("\n-- the deliverable " + "-" * 50)
     deliverable = find_deliverable(trace)
     if deliverable:
-        path, content, turn_no = deliverable
-        print(f"({path}, written at turn {turn_no})\n")
+        path, content, turn_no = deliverable["path"], deliverable["content"], deliverable["turn"]
+        print(f"({path}, attempted at turn {turn_no}; {deliverable['outcome']})\n")
         print(content.rstrip())
         for token, _, verdict in citations_in(content, ctx, turn_no):
             print(f"[cites {token} — {verdict}]")
@@ -758,7 +849,7 @@ def cmd_export(args) -> None:
     md = sr.get("metadata") or {}
     tmd = (sr.get("trajectory") or {}).get("metadata") or {}
     out = {
-        "format": "gsj-demo-episode-export/1",
+        "format": "gsj-demo-episode-export/2",
         "archive": {
             "path": str(entry["path"]),
             "file": entry["path"].name,
@@ -795,24 +886,29 @@ def cmd_export(args) -> None:
     for k, turn in enumerate(turns_of(trace)):
         calls = []
         for tc in turn["msg"].get("tool_calls") or []:
-            calls.append({"name": call_fn(tc).get("name"),
+            calls.append({"id": tc.get("id") if isinstance(tc, dict) else None,
+                          "name": call_fn(tc).get("name"),
                           "arguments": call_fn(tc).get("arguments", "")})
         results = []
-        for i, r in enumerate(turn["results"]):
-            content = content_text(r.get("content"))
-            results.append({"chars": len(content), "head": content[:200]})
-            paired = calls[i] if i < len(calls) else None
-            hits = (parse_hits(content)
-                    if paired and str(paired["name"]).startswith("mcp_gsj_search")
-                    else None)
+        for event in turn["tools"]:
+            r = event["result"]
+            content = content_text((r or {}).get("content"))
+            name = call_fn(event["call"]).get("name")
+            results.append({"tool_call_id": event["id"], "name": name,
+                            "status": event["status"], "result_turn": event.get("result_turn"),
+                            "chars": len(content),
+                            "head": content[:200], "result": r})
+            hits = (parse_hits(content) if event["status"] == "matched"
+                    and not (r.get("isError") is True or r.get("is_error") is True)
+                    and str(name).startswith("mcp_gsj_search") else None)
             if hits:
                 hit_pages.extend(h.get("page") for h in hits)
         turns.append({
-            "n": k + 1,
+            "n": k + 1 if turn["msg"] else None,
             "content": content_text(turn["msg"].get("content")) or None,
             "tool_calls": calls,
             "results": results,
-            "token_span": list(runs[k]) if k < len(runs) else None,
+            "token_span": list(runs[k]) if turn["msg"] and k < len(runs) else None,
         })
     ws = (trace.get("metadata") or {}).get("gsj_workspace") or {}
     deliverable = find_deliverable(trace)
@@ -824,15 +920,14 @@ def cmd_export(args) -> None:
         "reward": trace.get("reward"),
         # F-63 (CP-36): the outcome, first-class — a consumer filtering on
         # disposition alone would ingest well-formed failures unknowingly.
-        "deliverable": ({"written": True, "path": deliverable[0],
-                         "turn": deliverable[2]} if deliverable
-                        else {"written": False}),
+        "deliverable": deliverable or {"written": False, "attempted": False,
+                                       "outcome": "not_attempted"},
         "counts": {
             "prompt_tokens": len(trace.get("prompt_ids") or []),
             "response_tokens": len(ids),
             "trainable_tokens": sum(mask),
             "trainable_share": round(sum(mask) / len(mask), 4) if mask else None,
-            "assistant_turns": len(turns),
+            "assistant_turns": sum(t["n"] is not None for t in turns),
             "tool_calls": sum(len(t["tool_calls"]) for t in turns),
             "think_tokens": (sum(e - s for s, e in think)
                              if model_used.startswith("Qwen") else None),

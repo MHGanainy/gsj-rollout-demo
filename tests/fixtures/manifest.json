@@ -1,0 +1,34 @@
+[
+  {
+    "file": "sk-polar-b4422728-ee9e-41ab-b090-9275bc5a176e.thinking-off.json",
+    "sha256": "6c42a93136f83261d8670e229ee344981c60aacad5d7e9d20678785e265c0a1b",
+    "evidence": "real CP-81 stranger",
+    "hits": 2,
+    "tokens": 1,
+    "grounded": 0
+  },
+  {
+    "file": "sk-polar-8c56edb3-237a-4230-bda9-f43964910ce7.thinking-off.json",
+    "sha256": "abe2137e9176ad640dd722a7986a836080b39dde062902ce9780cbe0bcadcee7",
+    "evidence": "real CP-81 stranger",
+    "hits": 5,
+    "tokens": 0,
+    "grounded": 0
+  },
+  {
+    "file": "sk-polar-9978ad7c-a307-4f39-ad4d-fa2072f798b3.thinking-off.json",
+    "sha256": "e28afa53f913cd894c42725bfd369c8a919fac2a226daccd4ae3116b23f47365",
+    "evidence": "real CP-81 stranger",
+    "hits": 5,
+    "tokens": 0,
+    "grounded": 0
+  },
+  {
+    "file": "sk-polar-fd3217b4-ce0a-49e8-9035-8f5b47ec82bd.thinking-off.json",
+    "sha256": "136738170e150ffd37dcd6c6f0d43e7241a6d260e7a321c6fc5310ae2dc2e073",
+    "evidence": "real CP-82 fresh",
+    "hits": 5,
+    "tokens": 0,
+    "grounded": 0
+  }
+]

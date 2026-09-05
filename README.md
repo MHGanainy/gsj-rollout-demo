@@ -194,7 +194,7 @@ The **deliverable** line — this episode qualified (its provenance is
 sound) while plainly failing the task, and the system grades those two
 things separately, in the header. And the **tokens** line — `107
 trainable` is the loss-maskable span a trainer would actually consume
-(`./read.py export` hands over the same body as JSON, arrays referenced
+(`./read.py export` hands over a derived JSON projection, arrays referenced
 by sha256). A stronger model produces stronger sessions — the same
 stranger run's 6-turn `case_mill` episode read all three pages in order
 and wrote a coherent brief; what this weak one shows is that even the
@@ -671,3 +671,49 @@ The synthetic corpus is also the demo's proof: the 1998 easement deed
 exists only on `case_orchard`'s page 4, so an episode at timestep 2
 *cannot* cite it and an episode at timestep 4 *must* — the temporal cutoff,
 observable in one fact (and in every `show` transcript's page lines).
+
+
+## Reader evidence contract (CP-86)
+
+`show`, `export` and `decision_census` share one tool-call-ID join. Reordered
+results keep their tool identity. Missing results, unmatched results (including
+those without IDs), and duplicate/ambiguous IDs are named and retained; none
+is silently paired by position. Citation availability respects the turn in
+which a result arrived. This checks identifier grounding, not whether a legal
+claim is supported, and assigns no reward.
+
+A `write` call records an **attempt**, including its full attempted content.
+Only the tool's recognized success acknowledgement establishes `succeeded` at
+that turn; an explicit error or an error reply such as EACCES establishes
+`failed`. A missing, ambiguous or unrecognized reply gives `unknown`. A success
+acknowledgement does not prove that a file still exists. The deliverable is
+the **last write attempt**; earlier attempts remain in each turn's calls/results.
+
+`export` now emits **`gsj-demo-episode-export/2`**:
+
+- `turns[].tool_calls[]` adds `id`. `turns[].results[]` adds `tool_call_id`,
+  `name`, `status` (`matched`, `missing`, `unmatched`, `ambiguous`) and the
+  full original `result` (null when missing), plus its `result_turn` arrival
+  position; `chars` and `head` remain.
+  Results follow call identity rather than arrival position. Extra results
+  remain explicitly labelled; consumers must join by ID, never array index.
+  An archive containing only orphan results has an unnumbered group (`n: null`),
+  no token span and zero assistant turns.
+- `deliverable` adds `attempted` and `outcome` (`not_attempted`, `succeeded`,
+  `failed`, `unknown`). For attempts it carries `content`, raw `arguments`,
+  `tool_call_id`, original `result`, `path` and `turn`. `written` is true only
+  for recognized success, false for failed/no attempt, and **null for unknown**.
+  A v1 consumer treating the old boolean as proof of success must migrate.
+- `decision_census` retains its fields; corrected identity attribution can
+  change hits, citable forms and grounding verdicts. Token/mask/logprob archive
+  references and the original archives are unchanged. Token-span projection
+  remains positional and is not the thinking decoder's stronger alignment
+  guarantee (CP-82 §7 item 17).
+
+Legacy unstamped/stamped archives, quarantine wrappers, current decision
+result envelopes and historical concatenated JSON hit objects remain readable.
+Malformed config/archive roots refuse with the file, expected shape and a
+recovery action. The regression suite is `python -m pytest -q tests`;
+[fixture provenance and limitations](tests/fixtures/README.md) distinguish
+real captures from synthetic message mutations. Phase 6 inherits this fixture
+contract; no grader or core helper has been added.
