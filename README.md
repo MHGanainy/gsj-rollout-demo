@@ -41,8 +41,10 @@ anonymous image pulls, an Apple Silicon Mac, no prior state) against the
 reference stack — vLLM serving `Qwen/Qwen3-0.6B` host-local, the
 two-case synthetic corpus; where a number comes from another checkpoint,
 it says so. The CP-nn stamps name checkpoints of the library's measured
-record — one report per checkpoint under its
-[docs/reports](https://github.com/MHGanainy/gsj-harness-rollout-server/tree/main/docs/reports).
+record. The public checkpoint account is in the library's
+[tracked charter §7](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/CHARTER.md#7-gap-register).
+Full reports and ADR files are private working-tree records under the
+CP-48 decision; a public clone carries the charter, code and test evidence.
 Wrong expectations make a working system read as broken — the trainer
 repo learned that as
 [its finding F-18](https://github.com/MHGanainy/gsj-harness-rollout-server-examples/blob/main/FINDINGS.md)
@@ -343,7 +345,7 @@ The last two flags are load-bearing: the symmetric chat template
 is why multi-turn episodes reconstruct as ONE chain, and the pinned
 generation config IS your sampling policy — pi sends no sampling parameters.
 
-**1 — submit one episode** (the `up` printout's one-liner, with `--row 1`:
+**1 — submit one episode** (the `up` printout's one-liner, with `--row 2`:
 the taskbank the bring-up built from your corpus — the printout's taskbank
 line says how many rows yours produced; the synthetic corpus makes
 six rows, numbered 0–5, sorted by case, timestep and prompt id, and **row 2**
@@ -364,7 +366,7 @@ docker run --rm --network gsj-demo-net \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
   ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.7 \
   gsj-rollout submit --config /estate/rollout.yaml \
-    --from-bank /corpus/taskbank.parquet --row 1
+    --from-bank /corpus/taskbank.parquet --row 2
 ```
 
 (The token variable's name follows your corpus's `owner:` —
@@ -427,7 +429,7 @@ written. Three things it is careful about, because they are the point:
 - **Truncation is labelled where you will see it.** A `finish_reason:
   length` episode says so in the header AND at the point the text stops.
   It *qualified* — qualification checks provenance, not task success
-  ([the library's ADR-0025](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/decisions/ADR-0025-length-termination-surfaced-not-screened.md))
+  ([the library's checks specification](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/checks-spec.md))
   — and whether to train on it is the trainer's call.
 
 `export` is a projection of the archived body — the trace fields keyed by
