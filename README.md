@@ -140,7 +140,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.7` and refuses before the recipe would
+  floors the library at `>=0.1.8` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 
@@ -242,11 +242,18 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
+Library 0.1.8 is the floor for the published run/teardown, MCP-config and
+credential boundary fixes (library CP-85). The Polar image carries the same
+wheel; a host pip upgrade alone cannot update its packaged tools. Credentials
+adopted by the estate must follow the [shared credential grammar](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/guide/server-guide.md):
+nonempty printable ASCII
+without apostrophes or an odd run of trailing backslashes.
+
 ```bash
 # prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.7' pyarrow   # the library + the taskbank's parquet writer
+pip install 'gsj-harness-rollout-server>=0.1.8' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example: the corpus AND the thirty
@@ -354,8 +361,7 @@ is the transcript shown above; rows 0 and 4 are the two precedent prompts of
 model is apt to loop on). The estate requires sign-in for read (a sandbox agent cannot
 re-clone a case past its cutoff), so the generated config names the
 read-scoped token by *variable* (`estate.clone_credential_env`) and
-`submit` presents its value. Since library 0.1.7 — the version inside this
-checkout's `gsj-polar` image — `submit` reads that value from the `.env`
+`submit` presents its value. Since library 0.1.7, `submit` reads the `.env`
 beside its config when the variable is not exported, so the run's `.env`
 is mounted read-only beside `/estate/rollout.yaml` and nothing is sourced
 or exported; the token never reaches a trace:
@@ -364,7 +370,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.7 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.8 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```

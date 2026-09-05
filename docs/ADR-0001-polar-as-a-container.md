@@ -77,3 +77,25 @@ build args); and the sandbox image is pulled at bootstrap, not at first
 episode, so a broken registry path surfaces before an episode is spent.
 Option (b) remains the documented fallback for a host that cannot run
 registries at all — the F-45 printout in the library names it.
+
+
+CP-85 (2026-09-05): after PyPI 0.1.8 publication, recut with
+`LIB_REF=v0.1.8` / `LIB_VERSION=0.1.8` as `f0e8343a-gsj0.1.8`, and move the
+host floor to 0.1.8. The core submit implementation is unchanged, but the
+image carries the wheel’s changed estate/pipeline payload too. A-28’s
+release duty requires both platforms to carry that release. The read-only
+`.env` mount and automatic submit fallback remain the same contract.
+
+Published index `sha256:30e9d940bc55f815bb291d78ceba5cbf062616d6b4b29501dd7d0073c7de98a8`:
+- linux/amd64 `sha256:b6a74e33a4566d9d0efd3bc36ec7cd2dad6c22df369b2be6150b4425d719a82a`
+- linux/arm64 `sha256:7f5898b7eee1bc24b6990203534c2d227e0527e6bbe31d5fca6756580f18c902`
+
+Anonymous index/child retrieval and container import checks passed for both
+platforms, including version 0.1.8, the exact phase-2 estate payload and
+PiHarness’s BaseHarness relationship. The fresh-clone arm64 run used the
+published image and a fresh PyPI host install: up 42.682 s, preflight passed,
+row-2 submit accepted in 8.955 s, read/export and empty quarantine, down
+3.550 s. The read-only `.env` mount supplied submit’s named token without
+exporting it. Session `sk-polar-7fb2e7b0-6d5a-4cf3-8c83-b11ac0438fdb` had
+two turns, one case search, 170 trainable tokens, no deliverable; independent
+validation found no provenance violations. This does not establish task quality.

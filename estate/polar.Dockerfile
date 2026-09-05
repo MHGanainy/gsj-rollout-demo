@@ -46,7 +46,7 @@ RUN git clone --depth 1 --branch ${LIB_REF} ${LIB_REPO} /tmp/lib \
 # The wheel, from PyPI, pinned. pyarrow serves the corpus pipeline's
 # taskbank/verify and `gsj-rollout submit --from-bank`; it is an IMAGE
 # dependency, never a library one (the root pyproject stays parquet-free).
-ARG LIB_VERSION=0.1.7
+ARG LIB_VERSION=0.1.8
 RUN pip install --no-cache-dir gsj-harness-rollout-server==${LIB_VERSION} pyarrow
 
 WORKDIR /estate
