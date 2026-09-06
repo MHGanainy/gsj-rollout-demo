@@ -2,9 +2,9 @@
 """Generate the demo's synthetic corpus — the repo's own self-test and the
 worked example a stranger copies.
 
-    ./synthetic/make_corpus.py            # writes ./corpus-synthetic and
-                                          #        ./corpus-synthetic-decisions
-    ./synthetic/make_corpus.py --out DIR  # DIR and DIR-decisions
+    ./synthetic/make_corpus.py            # writes ./corpus-synthetic/
+                                          #        including decisions/
+    ./synthetic/make_corpus.py --out DIR  # DIR, including DIR/decisions
 
 The tree it writes is contract-valid without edits (both splits, a
 multi-timestep case, one skill-card prompt and free prompts) and the page
@@ -13,7 +13,7 @@ the 1998 easement deed exists ONLY on case_orchard's page 4 — an episode
 at timestep 2 must not see it (its checkout physically lacks the page and
 `search_case` is cutoff-filtered), an episode at timestep 4 must find it.
 
-Beside the corpus it writes a DECISIONS DROP (library CP-81): thirty
+Inside the corpus it writes a DECISIONS DROP (library CP-91): thirty
 fictional court decisions in the rii-dok v1 XML the library's decisions
 surface parses (docs/decisions-surface.md in the library repo — `<dokument>`,
 a `doknr`, `<dl class="RspDL">` rows with `rd_N` anchors, `tenor`,
@@ -24,10 +24,9 @@ rent reduction for flooding, a landlord's deferred repair. Made-up text,
 structurally real: the service ingests the drop as Randnummern (level 2 of
 the surface) and a search returns something RELEVANT to the cases. The
 thirty are data — `synthetic/decisions.json` — and the XML is rendered here,
-deterministically. The drop sits BESIDE the corpus (`<corpus>-decisions/`)
-because the corpus contract admits no `decisions/` entry inside a corpus
-yet (library wishlist row 73); `bootstrap.py up` finds it there and hands
-it to the library's bring-up as `--decisions-dir`.
+deterministically. The drop sits inside the corpus (`<corpus>/decisions/`)
+under corpus contract v3 (library 0.1.9); the library validates it with
+the tree, writes decisions.lock.json and serves it by default at `up`.
 
 AGENTS.md is the reference AGENTS.md — the text the reference system-prompt
 pin (G2) embeds, read out of the library's own packaged capture (library
@@ -456,13 +455,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(REPO / "corpus-synthetic"),
-                    help="the corpus root; the decisions drop goes to <out>-decisions")
+                    help="the corpus root; the decisions drop goes to <out>/decisions")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing tree (and its drop)")
     args = ap.parse_args()
     out = Path(args.out).resolve()
-    drop = out.parent / f"{out.name}-decisions"
-    for path in (out, drop):
+    drop = out / "decisions"
+    for path in (out,):
         if path.exists():
             if not args.force:
                 print(f"{path} already exists — pass --force to regenerate "
@@ -508,7 +507,7 @@ def main() -> int:
           "reduction for flooding, the deferred repair) — a search returns precedent "
           "a lawyer on these cases would want")
     print("next: point config.yaml's `corpus:` here and run ./bootstrap.py up "
-          "(it finds the drop beside the corpus)")
+          "(the library serves the corpus's decisions/ by default)")
     return 0
 
 

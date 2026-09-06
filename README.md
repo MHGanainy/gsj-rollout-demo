@@ -109,7 +109,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91)): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -140,7 +140,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.8` and refuses before the recipe would
+  floors the library at `>=0.1.9` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 
@@ -211,8 +211,9 @@ and that endpoint itself — that is everything; the bootstrap derives the rest.
 A host-local endpoint (`http://127.0.0.1:…`) is fine: the bootstrap rewrites
 it to `host.docker.internal` for the containers and prints the rewrite — on
 Linux the endpoint must then listen beyond loopback (`config.yaml.example`
-says why). A **decisions drop** needs no fourth input: put it beside the
-corpus as `<corpus>-decisions/` and `up` finds it ("Decisions" below).
+says why). A **decisions drop** needs no fourth input: put it inside the
+corpus as `decisions/` and the library validates, locks and serves it
+("Decisions" below).
 
 Words this README leans on: the **estate** is the five demo containers on one
 private docker network; **Polar** is the episode runtime the library vendors —
@@ -242,9 +243,9 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
-Library 0.1.8 is the floor for the published run/teardown, MCP-config and
-credential boundary fixes (library CP-85). The Polar image carries the same
-wheel; a host pip upgrade alone cannot update its packaged tools. Credentials
+Library 0.1.9 is the floor for corpus contract v3 and the published
+run-root and credential-cure repairs (library CP-88/90, released at CP-91).
+The Polar image carries the same wheel; a host pip upgrade alone cannot update its packaged tools. Credentials
 adopted by the estate must follow the [shared credential grammar](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/guide/server-guide.md):
 nonempty printable ASCII
 without apostrophes or an odd run of trailing backslashes.
@@ -253,11 +254,11 @@ without apostrophes or an odd run of trailing backslashes.
 # prerequisites: Docker (with compose v2), Python >= 3.12, git
 # (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
 #  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.8' pyarrow   # the library + the taskbank's parquet writer
+pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow   # the library + the taskbank's parquet writer
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example: the corpus AND the thirty
-                                  # decisions beside it — or bring your corpus
+                                  # decisions inside it — or bring your corpus
 cp config.yaml.example config.yaml   # then fill in the three values:
                                      # corpus, inference.base_url, inference.model
 
@@ -271,8 +272,8 @@ library CP-64 closed the last amd64-only gap (platform fact 1 above).
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
 nothing runs against an invalid tree) → pull the four images → derive
 **this estate's pins** from your corpus and your endpoint → hand your three
-values — and the decisions drop beside your corpus, if there is one, as
-`--decisions-dir` — to **the library's own estate tool** (`python -m gsj_rollout.estate`,
+values — and an external decisions fallback, if you kept one beside the
+corpus, as `--decisions-dir` — to **the library's own estate tool** (`python -m gsj_rollout.estate`,
 the production tool the wheel ships since 0.1.3 — as `gsj_rollout.bringup`
 through 0.1.5, renamed at library CP-72 — the exact answers it gets
 are written to `work/bringup-answers.yaml`), which stands up **Forgejo**,
@@ -307,9 +308,9 @@ clone cache under `work/runs/demo/mcp-data/` also carries the read token in
 its bare clones' git config, library wishlist 47, which is why the whole run
 directory is mode 0700; its `run.json` names variables, never values), the
 Polar leg's files are `work/estate/`, the archive is
-`work/traces/` — except the taskbank (`taskbank.parquet` +
-`corpus.lock.json`), which is written beside your corpus because it is
-derived from your corpus and belongs with it.
+`work/traces/` — except the derived corpus files: `taskbank.parquet`,
+`corpus.lock.json` and, when decisions/ contains XML, `decisions.lock.json`.
+These are written at the corpus root and belong with its data.
 
 ## Walkthrough: an episode, submitted and read
 
@@ -370,7 +371,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.8 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.9 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```
@@ -456,7 +457,7 @@ same for every case, not cutoff-scoped. The worked example brings thirty
 of them:
 
 ```
-./synthetic/make_corpus.py        # writes corpus-synthetic/ AND corpus-synthetic-decisions/
+./synthetic/make_corpus.py        # writes corpus-synthetic/, including decisions/
 ```
 
 **What they are.** Thirty fictional decisions of two invented courts of
@@ -482,17 +483,21 @@ who searches for the right of way over the disputed strip gets back
 paragraphs that answer the question — which is the only way to see that
 the tool works.
 
-**How the estate gets them.** No fourth input: the drop sits **beside**
-the corpus as `<corpus>-decisions/`, and `./bootstrap.py up` finds it and
-passes it to the library's bring-up as `--decisions-dir`. It is mounted
-read-only into the retrieval service, which embeds it as its own
-collection — the review the bring-up prints before the embed names your
-drop, and `./bootstrap.py status` prints it afterwards. Beside, not
-inside: the corpus contract has no `decisions/` entry yet, so `validate`
-would refuse one (`bootstrap.py` says so with the `mv` if you try). Bring
-your own by putting rii-dok v1 files there instead; with no drop at all,
-the service serves its thirty synthetic stand-ins and the tool still
-answers.
+**How the estate gets them.** No fourth input: the drop sits **inside**
+the corpus as `decisions/`. Library 0.1.9 validates it with the corpus;
+`up` writes `decisions.lock.json`, mounts it read-only and verifies that the
+served drop matches the lock. The review before embedding names the drop,
+and `./bootstrap.py status` prints it afterwards. Bring your own by
+putting rii-dok v1 files there. A changed drop is picked up by re-running
+`./bootstrap.py up`.
+
+A drop kept outside as `<corpus>-decisions/` remains the fallback through
+`--decisions-dir`, without the corpus lock. To migrate an older generated
+drop inward, run `mkdir -p <corpus>/decisions` then
+`mv <corpus>-decisions/*.xml <corpus>/decisions/` and re-run `up`.
+Two populated drops refuse and name both paths; choose one before retrying.
+With neither drop populated, the service serves its thirty synthetic
+stand-ins and the tool still answers.
 
 **Citing one.** The corpus's `AGENTS.md` carries the clause the surface
 asks for (§9.5), so the agent is told the grammar:
@@ -626,13 +631,13 @@ belongs: MODEL-SURFACE's "second family, measured" section.
 The corpus is a directory tree in
 [the contract's shape](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/corpus-contract.md).
 The synthetic corpus is the worked example — `./synthetic/make_corpus.py`
-writes exactly this (and the decisions drop beside it, next section):
+writes exactly this, including its decisions drop:
 
 ```
-corpus-synthetic-decisions/      # the thirty decisions, jb-<doknr>.xml — BESIDE the corpus ("Decisions" below)
 corpus-synthetic/
 ├── corpus.yaml                  # names the corpus, the git identity, the sandbox image
 ├── AGENTS.md                    # the agent's standing instructions (G2's pin derives from it)
+├── decisions/                   # thirty jb-<doknr>.xml files; up writes decisions.lock.json
 ├── skills/
 │   └── brief/
 │       └── SKILL.md             # a task shape; G1 pins these bytes
@@ -660,9 +665,10 @@ cutoff, so a later timestep repeats the earlier pages and adds its own,
 contiguously from 1. (`up` scaffolds these source trees into per-case git
 repos with one `timestep-<T>` branch each — the `md/page_NNNN.md` paths
 you see in transcripts are that *generated* layout, not something you
-create.) After `up`, two derived files appear beside your tree:
-`taskbank.parquet` — the tasks, one row per prompt — and
-`corpus.lock.json`.
+create.) After `up`, the corpus root also holds `taskbank.parquet` —
+the tasks, one row per prompt — and `corpus.lock.json`. A populated
+`decisions/` adds `decisions.lock.json`, written by the scaffold phase of
+`up` and checked against the served drop.
 
 That shape, with your documents in the pages, is all `bootstrap.py up`
 needs. `validate` names every rule your tree breaks before anything runs.
