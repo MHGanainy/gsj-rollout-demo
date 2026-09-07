@@ -40,9 +40,12 @@ inference:
 # vLLM's /tokenize + /detokenize; on an engine without them the bootstrap
 # says so out loud, the reference default stands, and THIS key is the
 # cure — docs/MODEL-SURFACE.md has the from-snapshot recipe). Set it
-# explicitly only to override, and know
-# the explicit value wins (./preflight.py's end-of-turn row checks
-# whichever is in effect).
+# explicitly only to override, and know the explicit value wins over the
+# derivation. Which file ./preflight.py's end-of-turn row checks: BEFORE
+# `up`, this file (or the default); AFTER `up`, work/estate/rollout.yaml —
+# what episodes actually run with — so an edit here takes effect only on
+# the next `up`, and the row says which file it read (measured 2026-09-07:
+# a wrong value appended here after `up` changed nothing).
 #end_of_turn_token_id: 151645
 # The glue stitch, for a chat template that rewrites history by a CONSTANT
 # span (./preflight.py's template row measures this and prints the exact

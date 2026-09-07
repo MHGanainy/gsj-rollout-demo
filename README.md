@@ -93,14 +93,24 @@ repo learned that as
   `--platform linux/amd64` explicitly and the per-episode sandbox ran
   under emulation — episode speed unaffected even then, since the agent
   talks to your endpoint over HTTP. That cure retired with the arc.
-- **Platform fact 2 — a non-Qwen endpoint works, and the serve argv is
-  yours to write.** `up` derives the model-bound pins from your
-  endpoint's own template render, automatically; what nobody can derive
-  is your serve command — the tool-call parser and the sampling pins are
-  flags only you can set. [docs/MODEL-SURFACE.md](docs/MODEL-SURFACE.md)
+- **Platform fact 2 — a non-Qwen endpoint works; the serve argv is yours
+  to write only when you serve the model.** `up` derives the model-bound
+  pins from your endpoint's own template render, automatically (G6's tail
+  and the end-of-turn id; G1/G2 from your corpus); what nobody can derive
+  over an API is the serve command — the tool-call parser and the sampling
+  pins are flags only the server's operator can set. Two cases, and the
+  README used to name only the first: **you serve the model** — pin the
+  sampling defaults there (`--generation-config`) and treat the argv as
+  part of the estate's provenance; **you were handed a URL** by a platform
+  team (the normal case, and round three's four strangers' case) — you
+  cannot pin anything, the policy is *unknown*, and `up` records it as
+  such in `work/estate/pins.gsj.json` (`provenance.engine.sampling_policy`,
+  `coverage.sampling_policy`) — see "The borrowed endpoint" and "What an
+  acceptance covers" below. [docs/MODEL-SURFACE.md](docs/MODEL-SURFACE.md)
   walks the whole surface; the first non-Qwen episode
   (Llama-3.1-8B-Instruct, CP-38) derived at `up`, preflighted all-ok, and
-  was accepted.
+  was accepted; round three (2026-09-07) added `qwen3.6-27b` on a borrowed
+  endpoint, twice, both accepted.
 - **Normal, not broken.** An empty quarantine is normal — the reference
   stack measured 72/72 accepted at library CP-32, this demo's smoke 1/1.
   A small model hitting the 8,192-token generation cap is labelled, not
@@ -165,6 +175,24 @@ repo learned that as
   daemon (a nested daemon needs its data root on a volume, `-v
   /var/lib/docker`, or the `vfs` storage driver), and `docker save/load`
   fails on the very same layers.
+- **The pull that is healthy and silent** (measured 2026-09-07, round
+  three: one stranger saw **21 minutes without a line** on a working pull
+  of the retrieval image at ~155 KB/s and had the `docker pull` PID in hand,
+  "one keystroke from killing it"; the whole image took 45 min on that pipe;
+  another stranger's took 39). `docker pull` prints a line only when a
+  layer *changes state*, so a single large layer on a slow pipe prints
+  nothing until it lands — the "~4 min" above is a fast pipe. Since
+  library CP-94 `up` prints a heartbeat once a minute during a pull
+  (elapsed time, and whether this host received bytes in the last minute),
+  and `./bootstrap.py status` says `ACTIVE` while an `up` runs. Before you
+  conclude a silent pull hung, three checks, in order: (1) the heartbeat
+  (or `./bootstrap.py status`) — if the host is still receiving bytes it
+  is slow, not hung; (2) `docker system df` twice a minute apart — the
+  daemon's used space grows as layers land; (3) the two failure signatures
+  in the bullet above (`Retrying in N seconds` / `unexpected EOF`, or
+  `failed to extract` / `failed to mount`) — a hung pull eventually prints
+  one, a healthy one never does. Only then kill it, and re-run `up`: the
+  daemon resumes from the layers it kept.
 
 ## What a trajectory looks like
 
@@ -286,7 +314,9 @@ without apostrophes or an odd run of trailing backslashes.
 #   Python >= 3.12, git
 mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands HERE,
                                      # the clone beside it (an in-tree .venv would show
-                                     # as untracked — the demo's .gitignore does not list it)
+                                     # as untracked — the demo's .gitignore does not list it).
+                                     # Already cloned to read this README? `cd ..` first:
+                                     # the venv goes beside the clone, then `cd` back in.
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
 pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow   # the library + the taskbank's parquet
@@ -345,7 +375,13 @@ two compose projects: `gsj-demo` (the library's bring-up — `gsj-demo-forgejo`,
 `gsj-demo-mcp`) and `gsj-demo-polar` (this repo's Polar leg —
 `gsj-demo-polar-rollout`, `gsj-demo-polar-gateway`, `gsj-demo-receiver`);
 `docker logs <name>` reaches any of them, and `./bootstrap.py status` lists
-what stands. The
+what stands — in one of three states: **ACTIVE** (an `up` or `down` holds
+`work/.bootstrap.lock`: it says wait and suggests nothing — during the
+image pulls there is no record and no container yet, which is normal;
+before library CP-94 it printed `nothing running — ./bootstrap.py up` then,
+and a stranger nearly obeyed), **no estate** (nothing running, no record:
+`./bootstrap.py up`), and **standing** (the containers, the URLs, the
+submit recipe). The
 bring-up publishes Forgejo and the MCP on `127.0.0.1` host ports of its
 choosing (its recipe; the ports are in its `== run demo ==` block and in
 `work/runs/demo/run.json`); the Polar leg publishes **no host ports** — to
@@ -370,10 +406,18 @@ one-liner. This is what to do with it.
 
 You may run it before `up` too, as soon as `config.yaml` is filled: every
 row except `tokenizer tail` answers then (that row waits for the pins `up`
-derives, and skips saying so), and on a non-reference model the
-`end-of-turn id` row settles only after `up` derives the id into
-`work/estate/rollout.yaml` — until then it compares against the Qwen3
-default and fails.
+derives, and skips, saying so — a `[ -- ]` line naming the missing file),
+and on a non-reference model the `end-of-turn id` row settles only after
+`up` derives the id into `work/estate/rollout.yaml` — until then it compares
+against the Qwen3 default and fails. **Do not cure that pre-`up` FAIL by
+writing the id into `config.yaml`**: an explicit value there overrides the
+derivation you are about to test (a stranger nearly did; the derivation
+gave the same 248046 unaided). And after `up`, the `end-of-turn id` row
+reads `work/estate/rollout.yaml` — *what episodes run with* — not
+`config.yaml`: an edit to `config.yaml` changes nothing until the next
+`up` regenerates that file, and the row says which file it read
+(measured 2026-09-07: a deliberately wrong `end_of_turn_token_id: 151645`
+appended to `config.yaml` after `up` left preflight all-ok).
 
 ```bash
 ./preflight.py
@@ -390,7 +434,10 @@ one failure you would otherwise learn only from G7 quarantines after the
 episodes are already spent) and names each mismatch **with its
 consequence** — so you learn your tokenizer differs from a preflight row,
 not from a quarantined episode. What an API cannot see (your sampling
-defaults) it says so, once, out loud.
+defaults) it says so, once, out loud — its `sampling defaults` row ends
+"pin them server-side", which is advice for the first of the two cases
+under Platform fact 2; on a borrowed endpoint read it as "The borrowed
+endpoint" below.
 
 For comparison, the reference stack's serve argv — the endpoint every number
 in this README was measured against:
@@ -409,13 +456,16 @@ The last two flags are load-bearing: the symmetric chat template
 is why multi-turn episodes reconstruct as ONE chain, and the pinned
 generation config IS your sampling policy — pi sends no sampling parameters.
 
-**1 — submit one episode** (the `up` printout's one-liner, with `--row 2`:
-the taskbank the bring-up built from your corpus — the printout's taskbank
-line says how many rows yours produced; the synthetic corpus makes
+**1 — submit one episode** (the `up` printout's one-liner **with `--row 2`
+in place of its `--row 0`** — the printout names the bank's first row and
+says so under the one-liner since library CP-94; a stranger who copied it
+verbatim ran a different episode from the one this README explains. The
+taskbank is what the bring-up built from your corpus — the printout's
+taskbank line says how many rows yours produced; the synthetic corpus makes
 six rows, numbered 0–5, sorted by case, timestep and prompt id, and **row 2**
 is the transcript shown above; rows 0 and 4 are the two precedent prompts of
-"Decisions" below, and rows 1 and 5 are the skill-card tasks the 0.6B floor
-model is apt to loop on). The estate requires sign-in for read (a sandbox agent cannot
+"Decisions" below — step 3 runs one — and rows 1 and 5 are the skill-card
+tasks the 0.6B floor model is apt to loop on). The estate requires sign-in for read (a sandbox agent cannot
 re-clone a case past its cutoff), so the generated config names the
 read-scoped token by *variable* (`estate.clone_credential_env`) and
 `submit` presents its value. Since library 0.1.7, `submit` reads the `.env`
@@ -496,21 +546,58 @@ written. Three things it is careful about, because they are the point:
   — and whether to train on it is the trainer's call.
 
 `export` is a projection of the archived body — the trace fields keyed by
-name (counts, boundaries, gate results, reconstruction stats, page census,
-per-turn calls) with the giant token/mask/logprob arrays **referenced, not
-repeated** (`--arrays` embeds them; they are ~95% of the body's bytes and
-the archive already holds them verbatim).
+name (counts, boundaries, the receiver's findings, reconstruction stats,
+page census, per-turn calls) with the giant token/mask/logprob arrays
+**referenced, not repeated** (`--arrays` embeds them; they are ~95% of the
+body's bytes, the archive already holds them verbatim, and the `archive`
+block carries the archive file's sha256 so a consumer can verify it read
+the same bytes). Its root key `format` is the version discriminator
+(`gsj-demo-episode-export/2`; a stranger guessed `schema`). Two fields a
+trainer can **assert on**, stronger than anything `show` renders:
+`page_census.pages_beyond_timestep` — the temporal cutoff as a machine
+field, `[]` on every accepted episode (`show`'s `all <= timestep 2 (the
+cutoff holds)` is the same fact rendered) — and `gate_findings`, the
+receiver's verdict (`[]` = accepted). What `gate_findings: []` does *not*
+say is which gates had anything to check: see "What an acceptance covers".
 
 Neither view adds anything: everything both show comes from the one
 archived JSON the receiver wrote. The archive is the truth; these are views.
 
+**3 — see the decisions tool work** (the walkthrough's row 2 is a free
+prompt on the case file: on the reference model it searched decisions
+too, on a stronger model it did not — both round-three episodes on a 27B
+left `decision_census.searched: false`; a precedent row makes the agent
+search them):
+
+```bash
+docker run --rm --network gsj-demo-net \
+  -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
+  -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.10 \
+  gsj-rollout submit --config /estate/rollout.yaml \
+    --from-bank /corpus/taskbank.parquet --row 0 --task-id precedent
+./read.py show            # the hits render as court, docket, Randnummer, the citation each admits
+./read.py export | python3 -c 'import json,sys; print(json.load(sys.stdin)["decision_census"])'
+```
+
+`decision_census.searched` is `true` and `hits_returned` counts the
+paragraphs the agent read; whether it *cited* one is the `tokens_written`
+list — the reference model's measured record is the table under
+"Decisions", and a stranger's 27B wrote none either.
+
 ## Decisions
 
-The estate's agent has two retrieval tools. `mcp_gsj_search_case` searches
-*this* case's pages and is scoped by the episode's cutoff.
+The estate's agent has **eleven tools on its roster**, and G3 pins that
+roster as a whole (the eleven-tool wire array, hashed; the set is the
+library's, not per-estate — a corpus does not change it). Eight are pi's
+built-ins (`read`, `ls`, `grep`, `find`, `write`, `edit`, `bash` and its
+kin) and three are this estate's MCP tools: `mcp_gsj_search_case`
+searches *this* case's pages and is scoped by the episode's cutoff;
 `mcp_gsj_search_decisions` searches **court decisions** — precedent, the
-same for every case, not cutoff-scoped. The worked example brings thirty
-of them:
+same for every case, not cutoff-scoped; `mcp_gsj_case_status` reports the
+episode's scope (`case_id`, `timestep`, `pages_visible`) and is often the
+first call a capable model makes (a fourth, `mcp_gsj_decision_stats`,
+reports the drop's census). The worked example brings thirty decisions:
 
 ```
 ./synthetic/make_corpus.py        # writes corpus-synthetic/, including decisions/
@@ -691,6 +778,67 @@ eight completions merged, zero findings**. What the second family
 taught (two turn terminators, the round trip's two halves, malformed
 JSON ending episodes, retrieval-free green) is written where it
 belongs: MODEL-SURFACE's "second family, measured" section.
+
+## What an acceptance covers
+
+`accepted` means the receiver's gates found nothing to complain about —
+under **this estate's** `work/estate/pins.gsj.json`, whose approved sets
+are not all this estate's. On a non-reference endpoint the file's eight
+slots stand like this (a stranger tabulated them on 2026-09-07; the file's
+`coverage` block says the same, per set, since library CP-94):
+
+| approved set | gate | on a foreign endpoint | what an acceptance therefore says |
+| --- | --- | --- | --- |
+| `skill_card_hash` | G1 | **derived here** from your corpus's skill cards | the card the row resolved is one of yours |
+| `system_prompt_hash` | G2 | **derived here** from your `AGENTS.md` | the wire system prompt is yours, byte for byte |
+| `tool_roster_hash` | G3 | **carried** from the reference estate, **checked on every trace** | the roster on the wire equals the reference's eleven tools |
+| `settings_hash` | G7 (settings clause) | **carried** from the reference, **checked on every trace** | the harness settings equal the reference's (compaction off) |
+| `g6_expected_tail_ids` / `_tail` | G6 | **derived here** from the endpoint's own template render | every assistant turn opened with the tail your template renders |
+| `tokenizer_hash` | G4 | **EMPTY** — not derivable over an API | **nothing** — no gate reads it; the served tokenizer's bytes were not measured |
+| `chat_template_hash` | G4 | **EMPTY** — not derivable over an API | **nothing** — the served template's bytes were not measured |
+| (no set) | sampling | **unknown** — pi sends no sampling parameters | **nothing** — the temperature that produced the logprobs is not recorded anywhere |
+
+Two things follow. A carried set that *matches* is still a measurement —
+G3 and G7 prove the harness is the reference harness on every trace. An
+empty set is not a gate that passed; it is a gate nothing checks: on the
+reference model the estate-side G4 walk verified the tokenizer and
+template bytes once, at pin time; on your endpoint nobody has, and `up`
+says so (`pins — … EMPTY — nothing checks them — G4`). On the reference
+model the same table reads carried-and-checked for G3/G7/G6 and
+carried-not-checked-by-any-trace-gate for G4.
+
+Where that warning belongs, argued at library CP-94: in the pins file
+itself (`coverage`, `provenance.engine` — the record a trainer sets
+`GSJ_PINS_PATH` to), in `up`'s pins line, and in `./read.py` beside
+`accepted` (parked: F-87). Not in the library's `submit`/receiver — a
+line there costs the size law and a release, and the archive already
+carries the whole answer by reference: the pins file the receiver
+validated against. `provenance.engine` used to be the reference estate's
+server record copied verbatim (`Qwen/Qwen3-0.6B` at `127.0.0.1:8000`, the
+H200's snapshot paths — "another machine entirely"); since library CP-94
+it is re-recorded for the endpoint `config.yaml` names, with the reference
+block kept under `carried_from`, labelled.
+
+## The borrowed endpoint
+
+`config.yaml.example`, the `up` printout and the preflight's `sampling
+defaults` row all say "pin them server-side". That is the case where you
+serve the model. The other case — a platform team hands you a URL you may
+not restart or re-argv — is the normal one, and both round-three demo
+strangers were in it. Then: the tool-call parser's *presence* you can test
+read-only (the preflight's `tool parser` row does; the library's
+`probe_model.py` step 5 too); its identity, the weights revision and the
+sampling policy you cannot. Such an estate's episodes are still accepted
+— every gate above still holds — and nothing downstream says the sampling
+policy was unknown, except the pins file: `provenance.engine.sampling_policy`
+and `coverage.sampling_policy` read `UNKNOWN`, which is what a trainer
+setting `GSJ_PINS_PATH` sees. What those traces are good for: **provenance
+work** (the cutoff, the pinned prompt and cards, the roster, the tail, the
+reconstruction — every claim this README makes) — and **not for
+training-distribution work**, where the temperature that produced 2,233
+logprob'd tokens is the single largest unknown in the artifact (a
+stranger's words). The library's register carries this as its open row 22
+(per-episode engine binding); when you *can* pin, do, and record the argv.
 
 ## Bring your own corpus
 

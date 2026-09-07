@@ -42,14 +42,18 @@ one published image, so no second checkout or venv is ever needed.
 """
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
+from contextlib import contextmanager
 from shlex import quote
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -80,6 +84,11 @@ ESTATE = WORK / "estate"           # the Polar leg's files: pins, rollout.yaml, 
 COMPOSE = HERE / "estate" / "compose.yaml"   # the Polar leg only (three containers)
 POLAR_ENV = WORK / "polar.env"     # the Polar leg's non-secret compose values
 POLAR_PROJECT = f"gsj-{RUN}-polar"
+LOCK = WORK / ".bootstrap.lock"    # held for the whole of `up`/`down` (CP-94): `status` reads it
+# CP-94 (round three): `docker pull` prints a line only when a layer changes
+# state — one stranger saw 21 minutes of silence on a healthy pull against
+# this README's "~4 min" and was a keystroke from killing it
+PULL_HEARTBEAT_S = float(os.environ.get("GSJ_DEMO_PULL_HEARTBEAT_S", "60"))
 ROLLOUT_HOST, GATEWAY_HOST, RECEIVER_HOST = "polar-rollout", "polar-gateway", "receiver"
 
 _T0 = time.monotonic()
@@ -99,6 +108,81 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
     if cmd[:2] == ["docker", "compose"]:
         kw.setdefault("env", scrubbed_env())
     return subprocess.run(cmd, text=True, **kw)
+
+
+@contextmanager
+def held_for(command: str):
+    """CP-94: `up` and `down` hold work/.bootstrap.lock for their whole run
+    — the demo's own image pulls happen BEFORE the library tool (and its
+    run lock) is ever invoked, so without this a `status` during the first
+    pull saw nothing running and no record and suggested a second `up`.
+    The kernel drops the lock with the process; never delete the file."""
+    WORK.mkdir(exist_ok=True)
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        die(f"another ./bootstrap.py command holds {LOCK}: "
+            f"{LOCK.read_text().strip() or 'an up or down'} is still running.",
+            "wait for it (./bootstrap.py status says ACTIVE while it runs, and its own "
+            "output says where it is); do not delete the lock file")
+    os.ftruncate(fd, 0)
+    os.write(fd, f"./bootstrap.py {command} (pid {os.getpid()}) since "
+                 f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n".encode())
+    try:
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def lock_holder() -> "str | None":
+    """Who holds the bootstrap lock, or None — a non-blocking probe."""
+    if not LOCK.is_file():
+        return None
+    fd = os.open(LOCK, os.O_RDONLY)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return LOCK.read_text().strip() or "a ./bootstrap.py command"
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)
+
+
+def host_rx_bytes() -> "int | None":
+    """Bytes this host's non-loopback interfaces have received (a liveness
+    signal for the pipe while a pull is silent — never the pull's own count)."""
+    try:
+        if platform.system() == "Linux":
+            total = 0
+            for line in Path("/proc/net/dev").read_text().splitlines()[2:]:
+                name, _, rest = line.partition(":")
+                if name.strip() != "lo" and rest.split():
+                    total += int(rest.split()[0])
+            return total
+        if platform.system() == "Darwin":
+            out = subprocess.run(["netstat", "-ibn"], capture_output=True, text=True).stdout
+            total = 0
+            for line in out.splitlines()[1:]:
+                cols = line.split()
+                if len(cols) >= 10 and cols[2].startswith("<Link#") and not cols[0].startswith("lo"):
+                    total += int(cols[6])
+            return total
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GiB"
 
 
 def compose_cmd(*args: str) -> list:
@@ -337,8 +421,38 @@ def ensure_image(image: str, what: str) -> None:
     if image_present(image):
         say(f"images — {image} present ({what})")
         return
-    say(f"images — pulling {image} ({what})")
-    pull = run(["docker", "pull", image], stderr=subprocess.PIPE)
+    say(f"images — pulling {image} ({what}) — docker's progress follows; a large layer on a "
+        f"slow pipe prints nothing until it lands, so a heartbeat every {PULL_HEARTBEAT_S:.0f}s "
+        "says whether this host's pipe is moving (README: 'The pull that is healthy and silent')")
+    result: dict = {}
+
+    def worker() -> None:
+        try:
+            result["proc"] = run(["docker", "pull", image], stderr=subprocess.PIPE)
+        except BaseException as exc:  # noqa: BLE001 — surfaced as a failed pull
+            result["proc"] = subprocess.CompletedProcess(["docker", "pull", image], 1, "",
+                                                         f"{type(exc).__name__}: {exc}")
+
+    puller = threading.Thread(target=worker, daemon=True)
+    puller.start()
+    started, rx0 = time.monotonic(), host_rx_bytes()
+    while True:
+        puller.join(PULL_HEARTBEAT_S)
+        if not puller.is_alive():
+            break
+        rx1 = host_rx_bytes()
+        if rx0 is None or rx1 is None:
+            moved = "this host's byte counters are not readable here"
+        elif rx1 - rx0 > 0:
+            moved = f"this host received {_human(rx1 - rx0)} in the last {PULL_HEARTBEAT_S:.0f}s — the pipe is moving"
+        else:
+            moved = (f"this host received NOTHING in the last {PULL_HEARTBEAT_S:.0f}s — before killing "
+                     "anything, the three checks in the README ('The pull that is healthy and silent')")
+        rx0 = rx1
+        elapsed = int(time.monotonic() - started)
+        say(f"images — still pulling {image}: {elapsed // 60}m{elapsed % 60:02d}s elapsed; {moved} "
+            "(a liveness signal for the pipe, not the pull's own byte count)")
+    pull = result["proc"]
     if pull.stderr:
         print(pull.stderr, file=sys.stderr, end="" if pull.stderr.endswith("\n") else "\n", flush=True)
     if pull.returncode == 0:
@@ -622,6 +736,57 @@ def derive_pins(corpus: Path, model: str, thinking: str,
                      "values; every other set's own block records who "
                      "derived or emptied it here."}
 
+    # CP-94 (round three): the packaged pins carry, under provenance.engine,
+    # the REFERENCE estate's server record — Qwen/Qwen3-0.6B at 127.0.0.1:8000
+    # with the H200's snapshot paths — and this bootstrap copied it verbatim
+    # into a foreign-endpoint estate's file, where a stranger read it as
+    # this host's. It is re-recorded for the endpoint config.yaml names, and
+    # the reference block is kept, labelled as what it is: carried.
+    reference_engine = prov.get("engine")
+    prov["engine"] = {
+        "recorded_by": "gsj-rollout-demo bootstrap.py up — for the endpoint config.yaml names",
+        "endpoint": base_url,
+        "served_model": {"id": model,
+                         "source": f"config.yaml inference.model — must appear in GET {base_url}/v1/models"},
+        "sampling_policy": ("UNKNOWN — pi sends no sampling parameters, so the endpoint's own "
+                            "defaults are the policy; not probeable over the API, and pinned only "
+                            "by whoever serves the model (README, 'The borrowed endpoint')"),
+        "weights_revision": "UNKNOWN — no OpenAI-compatible API reports it",
+        "tokenizer_and_chat_template_bytes": (
+            "carried from the reference estate (this is the reference model; the bytes were "
+            "measured there, not here)" if model == REFERENCE_MODEL else
+            "NOT MEASURED — G4's two approved sets are EMPTY; nothing on this estate checks them"),
+        "carried_from": {"what": "the library's packaged pins: the REFERENCE estate's engine "
+                                 "record — another machine; its host, snapshot paths and "
+                                 "generation config are not this endpoint's",
+                         **(reference_engine if isinstance(reference_engine, dict) else {})},
+    }
+    # what an acceptance under this file covers, per approved set — the
+    # same table the README prints (CP-94)
+    reference = model == REFERENCE_MODEL
+    doc["coverage"] = {
+        "skill_card_hash": "derived here from this corpus's skill cards (G1); checked on every trace",
+        "system_prompt_hash": "derived here from this corpus's AGENTS.md (G2); checked on every trace",
+        "tool_roster_hash": ("carried from the reference estate; checked on every trace (G3): the "
+                             "roster on the wire must equal the reference's eleven tools"),
+        "settings_hash": ("carried from the reference estate; checked on every trace (G7's "
+                          "settings clause): the harness settings must equal the reference's"),
+        "g6_expected_tail_ids": ("carried from the reference estate (the reference model); checked on "
+                                 "every trace (G6)" if reference else
+                                 "derived here from the endpoint's own template render (G6); "
+                                 "checked on every trace"),
+        "g6_expected_tail": "the same, as text",
+        "tokenizer_hash": ("carried from the reference estate; NOT checked by any trace gate — "
+                           "G4 is estate-side" if reference else
+                           "EMPTY — not measured, not checked anywhere on this estate (G4 is "
+                           "estate-side and needs the served snapshot)"),
+        "chat_template_hash": ("carried from the reference estate; NOT checked by any trace gate — "
+                               "G4 is estate-side" if reference else
+                               "EMPTY — not measured, not checked anywhere on this estate (G4 is "
+                               "estate-side and needs the served snapshot)"),
+        "sampling_policy": "UNKNOWN — no approved set covers it; an accepted trace says nothing about it",
+    }
+
     derived_eot = None
     if model != REFERENCE_MODEL:
         # G4's two hashes CANNOT be derived over an API — they are the
@@ -717,6 +882,13 @@ def derive_pins(corpus: Path, model: str, thinking: str,
         f"{doc.get('mode', 'thinking-off')} (from config `thinking: {thinking}`)")
     if corpus_agents == ref_agents:
         say("pins — your AGENTS.md is the reference text, so G2 equals the packaged pin")
+    say("pins — what an acceptance under this file covers: derived HERE G1, G2"
+        + (", G6" if model != REFERENCE_MODEL and derived_eot is not None else "")
+        + "; carried from the reference and checked on every trace G3, G7-settings"
+        + ("" if model != REFERENCE_MODEL else ", G6, G4")
+        + ("; EMPTY — nothing checks them — G4's tokenizer/chat-template hashes"
+           if model != REFERENCE_MODEL else "")
+        + "; sampling policy UNKNOWN either way (README: 'What an acceptance covers')")
     return derived_eot
 
 
@@ -1007,15 +1179,27 @@ def check_engine(url: str, model: str) -> str:
 # -------------------------------------------------------------------- status
 
 def print_status(demo: "dict | None", engine_state: "str | None",
-                 rec: "dict | None") -> None:
-    print("\n== the estate ==")
+                 rec: "dict | None", active: "str | None" = None) -> None:
+    # CP-94: three states — ACTIVE (a command holds work/.bootstrap.lock:
+    # say wait, suggest nothing), no estate yet, and the standing estate
+    if active:
+        print(f"\n== the estate == ACTIVE — {active} holds {LOCK}: wait for it.\n"
+              "  Its own output says where it is (an image pull prints a heartbeat every "
+              f"{PULL_HEARTBEAT_S:.0f}s; the library's bring-up prints one line per phase).\n"
+              "  `./bootstrap.py status` again when it finishes. Do not start a second `up` "
+              "(refused as busy) and never delete the lock file.")
+    else:
+        print("\n== the estate ==")
     for project in (f"gsj-{RUN}", POLAR_PROJECT):
         ps = run(["docker", "compose", "-p", project, "ps", "--format",
                   "table {{.Name}}\t{{.Status}}\t{{.Ports}}"], capture_output=True)
         body = "\n".join(ps.stdout.rstrip().splitlines()[1:])
-        print(body or f"({project}: nothing running — ./bootstrap.py up)")
+        print(body or (f"({project}: nothing running yet — the running command has not reached it)"
+                       if active else f"({project}: nothing running — ./bootstrap.py up)"))
     if rec is None:
-        print(f"\n(no bring-up record at {RUNDIR / 'run.json'} — ./bootstrap.py up)")
+        print(f"\n(no bring-up record at {RUNDIR / 'run.json'}"
+              + (" yet — it lands once the library's bring-up stands Forgejo up)" if active
+                 else " — ./bootstrap.py up)"))
     else:
         fj, mcp, ports = rec["forgejo"], rec["mcp"], rec["ports"]
         owner = fj["owner"]
@@ -1044,7 +1228,9 @@ on disk (all under {WORK}):
   estate/rollout.yaml             the same config, re-addressed for the Polar containers
   estate/pins.gsj.json            THIS estate's approved sets (GSJ_PINS_PATH)
   traces/                         validated traces (receiver-side leg)
-  sessions/                       per-episode session dirs + agent logs
+  estate/artifacts/<session_id>/  the harness's per-episode artifacts + agent log (pi's output)
+  sessions/                       the gateway's per-episode scratch — Polar removes it after
+                                  harvest, so it is EMPTY between episodes (CP-94)
 
 stop:      ./bootstrap.py down          (data survives)
 reset:     ./bootstrap.py down --wipe   (deletes {WORK})
@@ -1068,6 +1254,8 @@ the endpoint must satisfy (the library's CP-04' engine legs):
     if demo is not None and rec is not None:
         corpus = corpus_path(demo)
         read_env = rec["forgejo"]["read_token_env"]   # follows the corpus's owner
+        rows = (rec.get("corpus") or {}).get("taskbank_rows") or "?"
+        last = rows - 1 if isinstance(rows, int) else "?"
         print(f"""
 submit one episode (the README's walkthrough reads it afterwards). The estate
 requires sign-in for read; submit presents the read token by NAME
@@ -1080,6 +1268,9 @@ seam, inside this image: read, never exported — no subshell, nothing sourced):
     {POLAR_IMAGE} \\
     gsj-rollout submit --config /estate/rollout.yaml \\
       --from-bank /corpus/taskbank.parquet --row 0
+  (--row 0 is the bank's first row — this bank has {rows} rows, 0–{last}; the README's
+   walkthrough runs --row 2, the episode it explains, then a precedent row for the
+   decisions tool; rows are sorted by case, timestep and prompt id)
 one episode at a time under a fixed task id (a second concurrent submit is
 refused 409 — add --task-id <another>); ./bootstrap.py status reprints this.
 
@@ -1100,6 +1291,11 @@ def cmd_validate(args) -> None:
 
 
 def cmd_up(args) -> None:
+    with held_for("up"):
+        _cmd_up(args)
+
+
+def _cmd_up(args) -> None:
     check_docker()
     check_library()
     demo = load_demo_config(Path(args.config))
@@ -1170,10 +1366,15 @@ def cmd_status(args) -> None:
         except SystemExit:
             demo = None
     rec = json.loads((RUNDIR / "run.json").read_text()) if (RUNDIR / "run.json").is_file() else None
-    print_status(demo, None, rec)
+    print_status(demo, None, rec, active=lock_holder())
 
 
 def cmd_down(args) -> None:
+    with held_for("down"):
+        _cmd_down(args)
+
+
+def _cmd_down(args) -> None:
     check_docker()
     # the Polar leg: by project name, so a half-built work/ still comes down
     run(["docker", "compose", "-p", POLAR_PROJECT, "down", "--remove-orphans"])
