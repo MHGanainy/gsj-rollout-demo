@@ -23,9 +23,10 @@ DECISIONS DROP — real or synthetic court decisions in rii-dok v1 XML
 (jb-<doknr>.xml; the library's docs/decisions-surface.md) — needs no
 fourth input: put it INSIDE the corpus as decisions/ and the library
 validates, locks and serves it by default (corpus contract v3, 0.1.9).
-A drop kept beside the corpus as <corpus>-decisions/ remains the fallback
-through --decisions-dir. Two populated drops refuse; with neither, the
-retrieval service serves its synthetic 30.
+A drop kept beside the corpus as <corpus>-decisions/ remains the fallback:
+bootstrap.py up answers the library estate tool's --decisions-dir through
+work/bringup-answers.yaml; bootstrap.py has no such flag. Two populated
+drops refuse; with neither, the retrieval service serves its synthetic 30.
 
 Since library 0.1.3 this script is a READER (library CP-61). The estate
 itself — the git host, the owner and its tokens, the scaffold, the
@@ -56,18 +57,18 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.9"   # library 0.1.9 inside (CP-91 cut): corpus contract v3 and the CP-90 estate repairs
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.10"   # library 0.1.10 inside (CP-93 cut): CP-92 stranger refusals and partial-run status
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.5.0"       # multi-arch; 0.5.0 = the decisions surface (library CP-79) —
                                                              # 0.4.x refuses the `decisions.path` key a drop needs (library wishlist 77)
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 9)          # CP-91: published corpus contract v3 and the CP-90 estate
-                             # repairs; the pinned image carries the same wheel
+LIB_MIN = (0, 1, 10)         # CP-93: published CP-92 stranger refusals and partial-run
+                             # status; the pinned image carries the same wheel
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -134,6 +135,14 @@ def check_docker() -> None:
         die("`docker compose` (v2 plugin) is missing.",
             "install the Compose plugin (https://docs.docker.com/compose/install/) and re-run")
 
+    probe = run(["docker", "run", "--rm", "alpine", "true"], capture_output=True)
+    if probe.returncode != 0:
+        print(probe.stdout + probe.stderr, file=sys.stderr, end="", flush=True)
+        die("`docker run --rm alpine true` failed: this daemon has not proved it can run a container.",
+            image_failure_fix(probe.stderr, "alpine",
+                "fix the Docker error above and re-run `docker run --rm alpine true` until it exits 0; "
+                "a registry/TLS/EOF failure needs a reachable registry or an out-of-band image load"))
+
 
 def check_library() -> None:
     import warnings
@@ -146,15 +155,15 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.9 "
-            "ships corpus contract v3 and the run-root/credential cure repairs "
-            "(library CP-88/90, published at CP-91).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.9' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.10 "
+            "ships the native-platform and split pull refusals, partial-run status "
+            "and the seven-verb help (library CP-92, published at CP-93).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.10' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -163,7 +172,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -290,6 +299,29 @@ def image_present(image: str) -> bool:
     return run(["docker", "image", "inspect", image], capture_output=True).returncode == 0
 
 
+def image_failure_fix(stderr: str, image: str, download_fix: str) -> str:
+    """CP-92's pull classifier, kept local so even down works without the library.
+    Strong storage signs win; a bare errno needs a storage word and no transport marker.
+    """
+    text = (stderr or "").lower()
+    strong = ("failed to extract", "failed to mount", "whiteout", "failed to register layer",
+              "no space left", "read-only file system")
+    transport = ("dial tcp", "lookup ", "tls handshake", "unexpected eof", "connection refused",
+                 "no such host", "i/o timeout", "manifest unknown")
+    storage = ("layer", "extract", "mount", "overlay", "snapshotter", "unpack", "whiteout", "rootfs")
+    extract = any(word in text for word in strong) or (
+        not any(word in text for word in transport)
+        and any(word in text for word in ("operation not permitted", "invalid argument"))
+        and any(word in text for word in storage))
+    if not extract:
+        return download_fix
+    return (f"this daemon's storage could not extract or mount {image}. Check "
+            "`docker run --rm alpine true` (exit 0): a plain pull can pass while a run fails. "
+            "Fix the daemon's data root (full, read-only, or overlayfs under a nested daemon): "
+            "use `-v /var/lib/docker` on the nested daemon or `--storage-driver vfs`; "
+            "`docker save | docker load` fails on the same layers")
+
+
 def ensure_image(image: str, what: str) -> None:
     """Pull every published image up front: the first episode must not be
     the moment you learn your registry path is broken. (The bring-up now
@@ -306,13 +338,17 @@ def ensure_image(image: str, what: str) -> None:
         say(f"images — {image} present ({what})")
         return
     say(f"images — pulling {image} ({what})")
-    if run(["docker", "pull", image]).returncode == 0:
+    pull = run(["docker", "pull", image], stderr=subprocess.PIPE)
+    if pull.stderr:
+        print(pull.stderr, file=sys.stderr, end="" if pull.stderr.endswith("\n") else "\n", flush=True)
+    if pull.returncode == 0:
         return
     die(f"could not pull {image} (the docker error above is authoritative).",
-        "if this host cannot reach ghcr.io, load the image out-of-band "
-        "(docker save/load or skopeo) and re-run — local images are used as-is; "
-        "a `no matching manifest` error would mean the registry lost this "
-        "image's variant for your platform — report it")
+        image_failure_fix(pull.stderr, image,
+            "if this host cannot reach ghcr.io, load the image out-of-band "
+            "(docker save/load or skopeo) and re-run — local images are used as-is; "
+            "a `no matching manifest` error would mean the registry lost this "
+            "image's variant for your platform — report it"))
 
 
 # ---------------------------------------------------------------------- pins
@@ -473,12 +509,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.9' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.10' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -486,7 +522,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.9') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.10') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "

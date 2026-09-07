@@ -112,7 +112,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91)): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93)): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -143,7 +143,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.9` and refuses before the recipe would
+  floors the library at `>=0.1.10` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 - **Two pull outcomes that are not a missing manifest** (the 2026-09-06 (UTC)
@@ -265,9 +265,11 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
-Library 0.1.9 is the floor for corpus contract v3 and the published
-run-root and credential-cure repairs (library CP-88/90, released at CP-91).
-The Polar image carries the same wheel; a host pip upgrade alone cannot update its packaged tools. Credentials
+Library 0.1.10 is the floor for the published native-platform and split pull
+refusals, partial-run status and seven-verb help (library CP-92, released at CP-93).
+The bootstrap also checks that Docker can run a container and distinguishes
+download failures from extraction/mount failures. The Polar image carries the
+same wheel; a host pip upgrade alone cannot update its packaged tools. Credentials
 adopted by the estate must follow the [shared credential grammar](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/guide/server-guide.md):
 nonempty printable ASCII
 without apostrophes or an odd run of trailing backslashes.
@@ -287,7 +289,7 @@ mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands H
                                      # as untracked — the demo's .gitignore does not list it)
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
-pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow   # the library + the taskbank's parquet
+pip install 'gsj-harness-rollout-server>=0.1.10' pyarrow   # the library + the taskbank's parquet
                                                           # writer (add `pytest` to run the
                                                           # regression suite, README's last section)
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
@@ -425,7 +427,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.9 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.10 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```

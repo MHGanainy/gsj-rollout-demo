@@ -147,3 +147,39 @@ one turn, zero actual tools, 23 trainable tokens, finish `stop`, no
 deliverable. The model emitted a literal tool call as text. This proves
 published-artifact boundary/provenance behavior; it does not establish
 answer quality or functioning tool-call parsing. No GPU or H200 was used.
+
+
+CP-93 (2026-09-07): the 0.1.10 wheel was published on PyPI at
+2026-09-07T12:03:19.944176Z; demo edits began at 12:04:39Z. The host floor,
+remedies and image now select 0.1.10. A-28 requires this recut because the
+image carries CP-92's changed estate module: native-platform advice, split
+pull refusals, partial-run status, seven-verb help and the four pins-page
+warning URLs. The existing build recipe used public `LIB_REF=v0.1.10` and
+PyPI `LIB_VERSION=0.1.10`, completed on its first attempt and published
+`ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.10` for both platforms.
+
+Published index `sha256:ed35bc967693e55fff4bc4e1918aa0e7341c7b21a3abb0de940b9961c2f445f6`:
+
+- linux/amd64 `sha256:a089133953a7de712e387e8f8c12c17fa924a055f6bc96e8366c3915b781012d`
+- linux/arm64 `sha256:f79c10546a7debef9f0e25ffb666b4eba4eb04d3096a38d9acd4a11c692ea503`
+
+Both child manifests were read anonymously and both images were pulled
+using an empty Docker authentication configuration. Both platform containers
+report 0.1.10 and release source
+`f2537e7f13aa474644f8241cb2e410c8d5cc6044`; their packaged estate and pipeline
+hashes equal the independently installed public PyPI wheel. PiHarness
+subclasses BaseHarness, the installed estate classifies the stranger's
+whiteout and EOF errors correctly, and its sandbox cure names the native
+platform. MCP 0.5.0 and the sandbox pin carry unchanged payloads.
+
+F-86 closes with the bootstrap's split pull refusal and actual Alpine run
+preflight; F-85 (c) closes with the help sentence naming the library flag's
+owner and answers-file route. The library classifier was the existing
+candidate; the small local helper retains its decisions so Docker checks
+and a no-record down remain available before importing the library.
+Fourteen pull cases agree with the installed library, three smoke paths
+pass, a real unreachable-registry pull refuses with the retained download
+advice, and the existing demo suite passes 28/28. Historical 0.1.9 corpus
+contract claims remain true. The release's final acceptance gate uses a
+fresh public clone of this commit, the published image and real CPU
+inference; its accepted/read result belongs to the CP-93 release evidence.
