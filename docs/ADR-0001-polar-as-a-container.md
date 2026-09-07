@@ -183,3 +183,39 @@ advice, and the existing demo suite passes 28/28. Historical 0.1.9 corpus
 contract claims remain true. The release's final acceptance gate uses a
 fresh public clone of this commit, the published image and real CPU
 inference; its accepted/read result belongs to the CP-93 release evidence.
+
+CP-95 (2026-09-07): the 0.1.11 wheel was published on PyPI at
+2026-09-07T19:13:39.392296Z; demo edits began at 19:18:26Z. The host floor,
+remedies and image now select 0.1.11. A-28 requires this recut because the
+image carries CP-94's changed estate module: `status` in three states
+(ACTIVE via the run lock, incomplete corrected against the daemon,
+complete), the sandbox image checked before any container is pulled or
+created, the pull heartbeat, the pins line naming the approved sets left
+empty, and help on the four `up` flags and `--runs-dir`. The existing build
+recipe used public `LIB_REF=v0.1.11` and PyPI `LIB_VERSION=0.1.11`,
+completed on its first attempt (288 s for the export and push) and
+published `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.11` for both
+platforms.
+
+Published index `sha256:40cb348459c7b5c727d28bbcfa7f965c6c07333222eb7b0532e06b9b61440b2e`:
+
+- linux/amd64 `sha256:bc968fc0b109a86bbc1e8adff948d363898fb29a15ce255a7121a27e88d7cc43`
+- linux/arm64 `sha256:43fe5efae4a55b70fc6f0f14b32b0e46b63e049c45712adfb1b12172f0a3256c`
+
+Both child manifests were read anonymously and both images were pulled
+using an empty Docker authentication configuration. Both platform containers
+report 0.1.11 and release source
+`3f7334b835b4514248c37b3954643fb4040974b8`; their packaged estate
+(`e0102bd6…`) and pipeline (`a291ec56…`) hashes equal the independently
+installed public PyPI wheel. PiHarness subclasses BaseHarness, and the
+installed estate carries `lock_held`, `status_active`, `check_daemon`,
+`host_rx_bytes`, the heartbeat in `image_pull` (60 s default) and
+`empty_sets` in `pins_g1_check`. MCP 0.5.0 and the sandbox pin carry
+unchanged payloads and were not recut.
+
+F-87 and F-92 stay parked on `read.py`'s export format bump
+(`gsj-demo-episode-export/3`), which this floor bump does not make; no row
+is minted. The release's final acceptance gate uses a fresh clone of this
+commit, the published image and the Mac's vllm-metal reference engine; its
+accepted/read result belongs to the library's CP-95 release evidence.
+
