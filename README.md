@@ -50,15 +50,18 @@ repo learned that as
 [its finding F-18](https://github.com/MHGanainy/gsj-harness-rollout-server-examples/blob/main/FINDINGS.md)
 — so: what this costs, and what is normal.
 
-- **Install**: seconds — clone 1.7 s, venv + `pip install` 5.5 s
-  (measured at library CP-61, fast pipe). You bring Docker (compose v2),
-  Python >= 3.12 and git.
+- **Install**: clone 1.7 s; venv + `pip install` from PyPI **≈ 40 s
+  cold** (measured at library CP-81; two strangers on 2026-09-06 (UTC)
+  measured 36.6 s and 63.3 s on slow pipes) — 5.5 s at library CP-61 on a
+  fast pipe (cache state not recorded). You bring Docker with the `docker compose`
+  plugin (Compose V2 or later), Python >= 3.12 and git — the exact
+  prerequisite line is in "Run it" below.
 - **Disk**: **~6 GB** of images (measured at library CP-61 on
   Apple Silicon: the daemon grew 5.4 GB for the four images, whose sizes
   sum to 6.1 GB — the pull transfers less; an earlier README said 3.5 GB —
   that was the compressed estimate, not disk). `work/` after one episode:
   10–14 MB.
-- **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI 40 s, `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
+- **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI — the cold install figure quoted under **Install** above — `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
   image pulls, then the library's bring-up (Forgejo, the owner and its
   tokens, the scaffold, the retrieval service's first embed — 28 s
@@ -143,6 +146,25 @@ repo learned that as
   floors the library at `>=0.1.9` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
+- **Two pull outcomes that are not a missing manifest** (the 2026-09-06 (UTC)
+  stranger rounds hit both; `bootstrap.py`'s pull-failure text names only
+  the download-side causes today — an unreachable ghcr.io, a dropped
+  platform manifest — and prescribes an out-of-band load, so read the
+  docker error above it, which is authoritative): (1) a pull that prints
+  `Retrying in N seconds` per layer and ends `unexpected EOF` is a
+  **transport failure** — re-run `./bootstrap.py up` (idempotent: the
+  daemon resumes from the layers it kept; a stranger's cold pull of the
+  retrieval image retried two layers for 48 min on a slow pipe before
+  failing this way — 52 min of `up` in all);
+  (2) a pull that downloads every layer and then fails `failed to
+  extract layer … operation not permitted` (whiteouts) or `failed to
+  mount … fstype: overlay … invalid argument` means **the daemon's
+  storage cannot write here** — the registry answered; `docker run --rm
+  alpine true` is the check (a plain `docker pull debian:stable-slim`
+  succeeds on such a daemon, so a pull proves nothing), the cure is the
+  daemon (a nested daemon needs its data root on a volume, `-v
+  /var/lib/docker`, or the `vfs` storage driver), and `docker save/load`
+  fails on the very same layers.
 
 ## What a trajectory looks like
 
@@ -251,16 +273,36 @@ nonempty printable ASCII
 without apostrophes or an odd run of trailing backslashes.
 
 ```bash
-# prerequisites: Docker (with compose v2), Python >= 3.12, git
-# (a venv is yours to bring: python3 -m venv .venv && . .venv/bin/activate —
-#  PEP 668 systems refuse a bare pip install)
-pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow   # the library + the taskbank's parquet writer
+# prerequisites:
+#   Docker with the `docker compose` plugin (Compose V2 or later — the Go plugin,
+#     not the legacy `docker-compose` v1; measured on 2.37.1 and 2.40.2) whose
+#     daemon can RUN a container: `docker run --rm alpine true` exits 0. A daemon
+#     that answers `docker info` and even pulls single-layer images can still be
+#     unable to start one — a nested daemon on overlayfs did exactly that on
+#     2026-09-06 (two stranger runs died there, one 67 s into `up`); the pull is not the check,
+#     the run is.
+#   Python >= 3.12, git
+mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands HERE,
+                                     # the clone beside it (an in-tree .venv would show
+                                     # as untracked — the demo's .gitignore does not list it)
+python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
+                                                # refuse a bare pip install
+pip install 'gsj-harness-rollout-server>=0.1.9' pyarrow   # the library + the taskbank's parquet
+                                                          # writer (add `pytest` to run the
+                                                          # regression suite, README's last section)
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example: the corpus AND the thirty
                                   # decisions inside it — or bring your corpus
 cp config.yaml.example config.yaml   # then fill in the three values:
-                                     # corpus, inference.base_url, inference.model
+                                     #   corpus — the tree above (./corpus-synthetic)
+                                     #   inference.base_url — the endpoint's ORIGIN, no /v1:
+                                     #     the gateway appends /v1/chat/completions itself
+                                     #     (`validate` refuses a suffixed one)
+                                     #   inference.model — an `id` from
+                                     #     `curl <base_url>/v1/models`, byte-for-byte
+                                     #     (pick the one you mean if several are listed;
+                                     #     none listed = your endpoint is not up)
 
 ./bootstrap.py validate           # check the corpus before anything runs
 ./bootstrap.py up                 # the estate
@@ -296,7 +338,12 @@ verified, repos converged, the index matched by fingerprint) and says what
 it reused; the Polar leg is recreated only when its generated files
 changed. `./bootstrap.py down` stops the estate; `down --wipe` resets it.
 
-The estate is five containers on the `gsj-demo-net` docker network. The
+The estate is five containers on the `gsj-demo-net` docker network, in
+two compose projects: `gsj-demo` (the library's bring-up — `gsj-demo-forgejo`,
+`gsj-demo-mcp`) and `gsj-demo-polar` (this repo's Polar leg —
+`gsj-demo-polar-rollout`, `gsj-demo-polar-gateway`, `gsj-demo-receiver`);
+`docker logs <name>` reaches any of them, and `./bootstrap.py status` lists
+what stands. The
 bring-up publishes Forgejo and the MCP on `127.0.0.1` host ports of its
 choosing (its recipe; the ports are in its `== run demo ==` block and in
 `work/runs/demo/run.json`); the Polar leg publishes **no host ports** — to
@@ -318,6 +365,13 @@ You have just run `up` and its final printout ended with a `docker run`
 one-liner. This is what to do with it.
 
 **0 — preflight your endpoint (once per endpoint, before spending episodes):**
+
+You may run it before `up` too, as soon as `config.yaml` is filled: every
+row except `tokenizer tail` answers then (that row waits for the pins `up`
+derives, and skips saying so), and on a non-reference model the
+`end-of-turn id` row settles only after `up` derives the id into
+`work/estate/rollout.yaml` — until then it compares against the Qwen3
+default and fails.
 
 ```bash
 ./preflight.py
@@ -491,8 +545,11 @@ and `./bootstrap.py status` prints it afterwards. Bring your own by
 putting rii-dok v1 files there. A changed drop is picked up by re-running
 `./bootstrap.py up`.
 
-A drop kept outside as `<corpus>-decisions/` remains the fallback through
-`--decisions-dir`, without the corpus lock. To migrate an older generated
+A drop kept outside as `<corpus>-decisions/` remains the fallback, without
+the corpus lock: `./bootstrap.py up` detects the sibling drop and answers
+the **library estate tool's** `--decisions-dir` for you through
+`work/bringup-answers.yaml` — `bootstrap.py` itself has no such flag (its
+`up --help` lists none). To migrate an older generated
 drop inward, run `mkdir -p <corpus>/decisions` then
 `mv <corpus>-decisions/*.xml <corpus>/decisions/` and re-run `up`.
 Two populated drops refuse and name both paths; choose one before retrying.
@@ -610,7 +667,14 @@ The estate does not require Qwen. When `inference.model` is not the
 reference, `up` derives the tokenizer-bound pins from your endpoint's own
 template render — the G6 tail and the end-of-turn id, over vLLM's
 `/tokenize` + `/detokenize` — and names, out loud, what it cannot derive
-(G4's byte hashes; your sampling defaults). The preflight then verifies
+(G4's byte hashes; your sampling defaults). The library now owns the
+recipe from an endpoint URL to the values `up` needs —
+[docs/guide/bring-your-own.md#your-model](https://github.com/MHGanainy/gsj-harness-rollout-server/blob/main/docs/guide/bring-your-own.md#your-model):
+the served name from `/v1/models`, the end-of-turn id and the
+generation-prompt delta from `/tokenize` with the kwargs pi actually
+sends, and what an endpoint cannot give you (G4's byte hashes, the
+weights revision, the sampling policy), stated as absent; MODEL-SURFACE
+below stays the item-by-item surface. The preflight then verifies
 the derived values and measures the one property nothing checks *before*
 episodes are spent: whether your chat template re-renders history exactly
 (if it does not, every multi-turn episode reconstructs as disconnected
@@ -719,7 +783,8 @@ the **last write attempt**; earlier attempts remain in each turn's calls/results
 Legacy unstamped/stamped archives, quarantine wrappers, current decision
 result envelopes and historical concatenated JSON hit objects remain readable.
 Malformed config/archive roots refuse with the file, expected shape and a
-recovery action. The regression suite is `python -m pytest -q tests`;
+recovery action. The regression suite is `python -m pytest -q tests` (needs
+`pip install pytest`, which the install line above does not bring);
 [fixture provenance and limitations](tests/fixtures/README.md) distinguish
 real captures from synthetic message mutations. Phase 6 inherits this fixture
 contract; no grader or core helper has been added.

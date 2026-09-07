@@ -1105,12 +1105,34 @@ def explain(finding: str) -> tuple:
 
 
 def cmd_quarantine(args) -> None:
-    qdir = Path(args.dir) / "quarantine"
+    directory = Path(args.dir)
+    qdir = directory / "quarantine"
     entries = scan(qdir, True)
     if args.id is None:
         if not entries:
-            print(f"the quarantine is empty ({qdir}) — every archived episode "
-                  "passed validation.")
+            # F-83 (library CP-92): an archive with ZERO episodes — or a
+            # mistyped --dir — is not "every episode passed"; it is the
+            # siblings' refusal. The green sentence is earned only when
+            # accepted bodies exist beside an empty quarantine.
+            everything = all_entries(directory)
+            if not everything:
+                die(f"nothing archived under {directory} (or its quarantine/).",
+                    "submit an episode first (the README walkthrough's `submit one episode` "
+                    "step), or point --dir at a traces directory")
+            # count the way `ls` does — by each body's findings, not by which
+            # directory it sits in: a rejected wrapper at the top level means
+            # --dir points at a quarantine/ itself, not at a traces root
+            rows = [(e, *load(e)) for e in everything]
+            accepted = sum(1 for _, f, _ in rows if not f)
+            rejected = len(rows) - accepted
+            if rejected:
+                die(f"{accepted} accepted; {rejected} rejected "
+                    f"{'body sits' if rejected == 1 else 'bodies sit'} in {directory} itself "
+                    "— point --dir at the traces root (its quarantine/ is what this verb lists)",
+                    "re-run with --dir <traces root>; `./read.py ls` shows every body "
+                    "under a root and its quarantine/")
+            print(f"{accepted} accepted, 0 quarantined — the quarantine is empty "
+                  f"({qdir}): every archived episode passed validation.")
             return
         print(f"{len(entries)} quarantined episode(s) under {qdir}:\n")
         for e in entries:

@@ -506,7 +506,8 @@ def main() -> int:
           "fence, prescriptive possession, lease termination for arrears, rent "
           "reduction for flooding, the deferred repair) — a search returns precedent "
           "a lawyer on these cases would want")
-    print("next: point config.yaml's `corpus:` here and run ./bootstrap.py up "
+    print("next: point config.yaml's `corpus:` here, then ./bootstrap.py validate — "
+          "or straight to ./bootstrap.py up, which validates first "
           "(the library serves the corpus's decisions/ by default)")
     return 0
 
