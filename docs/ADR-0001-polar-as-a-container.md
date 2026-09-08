@@ -219,3 +219,40 @@ is minted. The release's final acceptance gate uses a fresh clone of this
 commit, the published image and the Mac's vllm-metal reference engine; its
 accepted/read result belongs to the library's CP-95 release evidence.
 
+CP-97 (2026-09-08): the 0.1.12 wheel was published on PyPI at
+2026-09-08T15:19:35.214965Z; demo edits began at 2026-09-08T15:21:01Z (the stamp the patch
+script wrote, not memory — the CP-95 record's minute was wrong). The host
+floor, remedies and image now select 0.1.12. A-28 requires this recut
+because the image carries CP-96's and CP-97's changed estate module: the
+gateway-host probe by `docker exec` into the run's own retrieval container
+(a probe that cannot run degrades with the cure named instead of aborting
+one file short of `rollout.yaml`), every readiness wait on the process's
+clock with the measured wait printed beside the budget, the collection
+being built on the poll line, `verify`'s skips counted apart, the pull
+heartbeat naming the layer phase, the storage-driver warning, and
+`pins.skeleton.json` written beside `rollout.yaml` with the G6 tail and
+end-of-turn id measured from the engine (library ADR-0042). The existing
+build recipe used public `LIB_REF=v0.1.12` and PyPI `LIB_VERSION=0.1.12`
+and published `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.12` for both
+platforms.
+
+Published index `sha256:f9f2e2171d278690746b1c31878d7aa989d474fd4e1452c70653110a8a6e07c5`:
+
+- linux/amd64 `sha256:bb73342ec082f02e90698636d17c6bbd4715ad970ed0418bd543570af66608a1`
+- linux/arm64 `sha256:17390699984486b1093d769833169acba8eb0258be973fe5a7de2d77062c118a`
+
+Both child manifests were read anonymously and both images were pulled
+using an empty Docker authentication configuration. Both platform
+containers report 0.1.12 and release source `3ac3fcdac1c31a518303f8384efb37fc76d26e0f`; their packaged
+estate (`eed44912…`) and pipeline
+(`a291ec56…`) hashes equal the
+independently installed public PyPI wheel. PiHarness subclasses
+BaseHarness, and the installed estate carries `probe_dial`,
+`reap_container`, `measure_tail`, `pins_skeleton`, `refuse_skeleton_pins`,
+`choose_end_of_turn`, `verify_headline` and `pull_phase_summary`, with the
+skeleton's name and format, the reaper's and the sleep-skew bounds, the
+`docker exec` dial, the monotonic wait and the `{{.Driver}}` read. MCP
+0.5.0 and the sandbox pin carry unchanged payloads and were not recut. What
+this demo does not take from 0.1.12: `read.py` is untouched, so F-87 and
+F-92 stay parked on the export format bump — this sitting is a floor bump
+and an image cut, not the one that opens `read.py`.
