@@ -80,7 +80,9 @@ def test_in_net_python_fallback_is_named_removed_in_a_finally_and_a_timeout_is_a
             assert "--rm" not in cmd and cmd[2] == "--name" and cmd[3].startswith("gsj-demo-probe-")
             raise subprocess.TimeoutExpired(cmd, kw["timeout"])
         assert cmd[:3] == ["docker", "rm", "-f"], cmd
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+        # the measured shape (library estate/corpus/tests/cli_shapes.json,
+        # `docker rm -f <present>`): the CLI PRINTS the name it removed
+        return subprocess.CompletedProcess(cmd, 0, cmd[3] + "\n", "")
 
     monkeypatch.setattr(bootstrap, "run", fake_run)
     proc = bootstrap.in_net_python("print('x')", timeout=90)
@@ -91,14 +93,31 @@ def test_in_net_python_fallback_is_named_removed_in_a_finally_and_a_timeout_is_a
     assert ["docker", "rm", "-f", name] in calls and "still creating" not in proc.stderr
 
 
+def _rm_f(cmd, *, present: bool) -> subprocess.CompletedProcess:
+    """`docker rm -f <name>`, in the shapes the real CLI answers with —
+    measured at library CP-98/CP-99 on Docker 28.5.1 (API 1.51) and on a
+    nested 29.8.0 `vfs` daemon, recorded in the library's
+    `estate/corpus/tests/cli_shapes.json`. **Both exit 0**; the difference
+    is on the streams, which is F-101's whole point: this fake used to
+    answer exit 1 for a missing container, so the bound it proved never ran
+    against any daemon."""
+    if present:
+        return subprocess.CompletedProcess(cmd, 0, cmd[3] + "\n", "")
+    return subprocess.CompletedProcess(
+        cmd, 0, "", f"Error response from daemon: No such container: {cmd[3]}\n")
+
+
 def test_reap_container_keeps_trying_and_the_timeout_names_a_container_it_could_not_reap(monkeypatch):
     monkeypatch.setattr(bootstrap.time, "sleep", lambda s: None)
-    answers = iter([1, 0])
-    monkeypatch.setattr(bootstrap, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, next(answers), "", ""))
+    answers = iter([False, False, True])       # not produced, not produced, then there
+    calls = []
+    monkeypatch.setattr(bootstrap, "run", lambda cmd, **kw: (calls.append(cmd),
+                                                             _rm_f(cmd, present=next(answers)))[1])
     assert bootstrap.reap_container("gsj-demo-probe-1", wait_s=60) is True
+    assert calls == [["docker", "rm", "-f", "gsj-demo-probe-1"]] * 3    # the bound engages (F-101)
     clock = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(bootstrap.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(bootstrap, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "No such container"))
+    monkeypatch.setattr(bootstrap, "run", lambda cmd, **kw: _rm_f(cmd, present=False))
     assert bootstrap.reap_container("gsj-demo-probe-2", wait_s=30) is False
 
     def fake_run(cmd, **kw):
@@ -106,7 +125,7 @@ def test_reap_container_keeps_trying_and_the_timeout_names_a_container_it_could_
             return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         if cmd[:2] == ["docker", "run"]:
             raise subprocess.TimeoutExpired(cmd, kw["timeout"])
-        return subprocess.CompletedProcess(cmd, 1, "", "No such container")
+        return _rm_f(cmd, present=False)
 
     monkeypatch.setattr(bootstrap, "run", fake_run)
     monkeypatch.setattr(bootstrap, "reap_container", lambda name, wait_s=30: False)
@@ -274,7 +293,12 @@ def test_check_docker_names_a_copy_on_create_storage_driver_before_anything_runs
     bootstrap.check_docker()
     out = capsys.readouterr().out
     assert "storage driver 'vfs': every container is a full COPY of its image" in out
-    assert "~13 GB per container" in out and "Continuing — slowly" in out
+    # CP-99/round five re-words the price to a CONTROLLED measurement — same
+    # door, same corpus, same row, the driver the only difference
+    assert "sandbox init took 19.4 s here against 1.1 s there, 17×" in out
+    assert "Continuing — slowly" in out
+    assert "31 G against 8.4 G for 4.061 GB of images" in out
+    assert "~13 GB per container" not in out       # inferred once, never measured
 
 
 def test_check_docker_is_silent_about_an_overlay_driver(monkeypatch, capsys):

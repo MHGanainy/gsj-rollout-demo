@@ -261,12 +261,23 @@ def reap_container(name: str, wait_s: float = PROBE_REAP_S) -> bool:
     create is still in flight when the client dies and the container
     appears only when the copy ends (library CP-96's proof: a `rm -f` a
     second after the kill found nothing; the container turned up `Created`
-    four minutes later). True when it is gone or never appeared in time."""
+    four minutes later). True when it is gone; False when the daemon had not
+    produced it within the bound.
+
+    F-101 (library row 100, measured at library CP-97 and fixed there at
+    CP-98; the same two lines here): `docker rm -f <a name that does not
+    exist>` exits **0** — `No such container` goes to stderr — so reading
+    the exit code returned True on the first tick and this bound never ran.
+    *Removed* is read off STDOUT instead: the CLI prints the name it
+    removed. Stdout over stderr on purpose — a message text that stopped
+    matching would fail LOUD here (the loop runs to its bound and says so)
+    where a stderr match that stopped matching would fail silent."""
     started = time.monotonic()
     while True:
-        if run(["docker", "rm", "-f", name], capture_output=True).returncode == 0:
+        proc = run(["docker", "rm", "-f", name], capture_output=True)
+        if proc.stdout.strip() == name:      # removed: the CLI names what it removed
             return True
-        if time.monotonic() - started >= wait_s:
+        if time.monotonic() - started >= wait_s:   # `No such container`: not produced yet
             return False
         time.sleep(2)
 
@@ -340,11 +351,16 @@ def check_docker() -> None:
         # library CP-96 (round four): a post-mortem turned into a warning at
         # the first Docker call — the same daemon that answered "version"
         say(f"docker — storage driver {driver.stdout.strip()!r}: every container is a full "
-            "COPY of its image, not a layer over it — each episode's sandbox container "
-            "copies the harness image (measured ~13 GB per container and ~60 GB of image "
-            "growth at round four), a create takes minutes, and disk fills fast. The cure "
-            "is the daemon, not this script: a data root on ext4/xfs with overlay2 (a "
-            "nested daemon: `-v /var/lib/docker`). Continuing — slowly.")
+            "COPY of its image, not a layer over it. Measured on identical work, this "
+            "driver against overlay2 (round five, the same door and corpus and row): an "
+            "episode's sandbox init took 19.4 s here against 1.1 s there, 17× — the "
+            "731 MB harness image being copied is the only plausible tenant of that "
+            "delta — and the data root ends up holding 3.7× what overlay2 holds for the "
+            "same images (31 G against 8.4 G for 4.061 GB of images). On a LOADED host "
+            "it is worse than a ratio: round four blew Polar's 600 s sandbox-create "
+            "budget here twice. The cure is the daemon, not this script: a data root on "
+            "ext4/xfs with overlay2 (a nested daemon: `-v /var/lib/docker`). "
+            "Continuing — slowly.")
 
     probe = run(["docker", "run", "--rm", "alpine", "true"], capture_output=True)
     if probe.returncode != 0:

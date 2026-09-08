@@ -57,7 +57,14 @@ repo learned that as
   fails outright** before anything else has run: pip's default 15 s read
   timeout dies mid-way through pyarrow's 46.8 MB wheel with a thirty-line
   `ReadTimeoutError` traceback and no retry hint (round four, 2026-09-07:
-  two strangers, at 6.7 MB and 15.7 MB in). The cure is pip's own:
+  two strangers, at 6.7 MB and 15.7 MB in). **It does not always say
+  "timeout"**: when the 15 s expires during the *resolver's* metadata
+  fetch instead of a wheel download, pip reports `Could not find a
+  version that satisfies the requirement pydantic … (from versions:
+  none)` — a network fault that names a dependency and reads like a
+  broken package (round five: two more strangers lost their first
+  install, one to each signature; cost of the second, one wrong
+  diagnosis). The cure is pip's own, for both:
   `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.12' pyarrow`
   — the same command with two flags; an unchanged retry also recovers when
   the drop was transient. `docker pull` has three bullets of this guidance
@@ -70,11 +77,19 @@ repo learned that as
   earlier README said 3.5 GB — that was the compressed estimate, not disk).
   `work/` after one episode: 10–14 MB. **On a copy-on-create driver
   (`vfs`) the figure is a different order of magnitude**: every container is
-  a full copy of its image, not a layer over it — round four measured
-  ~60 GB of root-filesystem growth for what the daemon accounted as 3.7 GB
-  of images, and **~13 GB per sandbox container** of the 731 MB harness
-  image, each create taking minutes (b2: 234 GB → 311 GB after six). `up`
-  names the driver at its first Docker call since library CP-96; this
+  a full copy of its image, not a layer over it. Round five measured it
+  against an `overlay2` control — same door, same corpus, same row, the
+  driver the only difference: **31 G of data root against 8.4 G** for the
+  same 4.061 GB of images (3.7×, and 7.6× the images' own size here; the
+  other door's `vfs` container measured 7.5×, 27 G for 3.588 GB), and the
+  episode's **sandbox init taking 19.4 s against 1.1 s** — the 731 MB
+  harness image being copied is the only plausible tenant of that delta. On a *loaded* host it is worse than a ratio: round four
+  blew Polar's 600 s sandbox-create budget here twice and measured ~60 GB
+  of root-filesystem growth for what the daemon accounted as 3.7 GB of
+  images. (Round four's "~13 GB per sandbox container" was inferred from
+  that one host and is retired — the ratios above are what two controlled
+  pairs actually measured.) `up` names the driver at its first Docker call
+  since library CP-96 and prices it to this pair since library CP-99; this
   README's `vfs` cure below is priced accordingly.
 - **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI — the cold install figure quoted under **Install** above — `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
@@ -189,8 +204,9 @@ repo learned that as
   succeeds on such a daemon, so a pull proves nothing), the cure is the
   daemon (a nested daemon needs its data root on a volume, `-v
   /var/lib/docker` — prefer this: `vfs` also cures it but costs a full
-  image copy per container, ~13 GB and minutes per sandbox, and blows
-  Polar's 600 s sandbox-create budget on a busy host — round four), and
+  image copy per container: 3.7× the disk and a 17× slower sandbox create
+  measured against an overlay2 control (round five), and on a busy host it
+  blows Polar's 600 s sandbox-create budget outright — round four), and
   `docker save/load` fails on the very same layers.
 - **The pull that is healthy and silent** (measured 2026-09-07, round
   three: one stranger saw **21 minutes without a line** on a working pull
@@ -328,8 +344,13 @@ named instead of aborting one file short of `rollout.yaml`), every readiness wai
 on the process's clock with the measured wait printed beside the budget, the
 collection being built on the poll line, `verify`'s skips counted apart from its
 passes, the pull heartbeat naming the layer phase, the storage-driver warning, and
-`pins.skeleton.json` written beside `rollout.yaml` with the G6 tail and end-of-turn
-id measured from the engine (library CP-96 + CP-97, released at CP-97), on top of
+`work/runs/demo/pins.skeleton.json` — beside the run's OWN `rollout.yaml`, which is
+not the `work/estate/rollout.yaml` this walkthrough hands you (the estate writes
+three; a round-five stranger looked in the wrong one first) — with the G6 tail and
+end-of-turn id measured from the engine, and, since library CP-99, saying in the
+file whether the walk it starts is needed on this estate at all: here it is not,
+because `bootstrap.py` has already derived real G1/G2 into
+`work/estate/pins.gsj.json` (library CP-96 + CP-97, released at CP-97), on top of
 `status` in three states, the sandbox image checked before any Docker call, the
 pull heartbeat and the pins line naming the approved sets left empty (library
 CP-94, released at CP-95), the native-platform and split pull refusals, partial-run
@@ -460,8 +481,9 @@ be a `[FAIL]` whose second cure was the very thing the next sentence
 forbids — "the tool wins by proximity", a round-four stranger wrote, and
 nearly took it). **Do not cure a pre-`up` mismatch by writing the id into
 `config.yaml`**: an explicit value there overrides the derivation you are
-about to test (two strangers nearly did; the derivation gave the same
-248046 unaided). **Exit codes**: 0 when no row is `[FAIL]` (warnings are
+about to test (two strangers nearly did; in both cases the derivation had
+already given the same id unaided — which the `[warn]` row prints from
+**your** endpoint, not from this page). **Exit codes**: 0 when no row is `[FAIL]` (warnings are
 the limits of what an API can see), 1 when one is, or when `config.yaml`
 cannot be read — so a healthy endpoint exits 0 both before and after `up`,
 and the early run is safe under `set -e`. And after `up`, the `end-of-turn id` row
