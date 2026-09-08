@@ -90,6 +90,7 @@ LOCK = WORK / ".bootstrap.lock"    # held for the whole of `up`/`down` (CP-94): 
 # state — one stranger saw 21 minutes of silence on a healthy pull against
 # this README's "~4 min" and was a keystroke from killing it
 PULL_HEARTBEAT_S = float(os.environ.get("GSJ_DEMO_PULL_HEARTBEAT_S", "60"))
+COPY_ON_CREATE_DRIVERS = ("vfs",)     # library CP-96: name it at +17 s, not in a post-mortem
 ROLLOUT_HOST, GATEWAY_HOST, RECEIVER_HOST = "polar-rollout", "polar-gateway", "receiver"
 
 _T0 = time.monotonic()
@@ -109,6 +110,59 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
     if cmd[:2] == ["docker", "compose"]:
         kw.setdefault("env", scrubbed_env())
     return subprocess.run(cmd, text=True, **kw)
+
+
+def popen(cmd: list, **kw) -> subprocess.Popen:
+    """The streaming seam beside `run` (library CP-96): a process whose
+    stdout is read line by line while it runs — the tests hand back a fake."""
+    return subprocess.Popen(cmd, text=True, **kw)
+
+
+# `docker pull` without a TTY prints one line per layer state transition:
+# "<id>: Pulling fs layer" → "Downloading" → "Verifying Checksum" →
+# "Download complete" → "Extracting" → "Pull complete" (and "Already exists").
+_PULL_STATES = ("Pull complete", "Already exists", "Extracting", "Download complete",
+                "Verifying Checksum", "Downloading", "Pulling fs layer", "Waiting")
+
+
+def pull_phase_tally(layers: dict, line: str) -> None:
+    """Fold one line of docker's pull output into the per-layer state map."""
+    head, sep, state = line.strip().partition(": ")
+    if not sep or " " in head or len(head) < 8:
+        return                                  # the tag line, Digest:, Status:
+    for known in _PULL_STATES:
+        if state.startswith(known):
+            layers[head] = known
+            return
+
+
+def pull_phase_summary(layers: dict) -> "tuple[str, bool]":
+    """What the layers are doing, and whether the pipe SHOULD be moving —
+    round four (library CP-96, F-99): a heartbeat that read only received
+    bytes said "the pipe is moving" through an extraction (26 KiB of noise),
+    and a stranger counted `Download complete` against `Pull complete` by
+    hand to tell a phase change from a stall. Extraction expects no bytes."""
+    if not layers:
+        return "no layer line from docker yet (the manifest is still being resolved)", True
+    counts = {st: 0 for st in _PULL_STATES}
+    for state in layers.values():
+        counts[state] += 1
+    done = counts["Pull complete"] + counts["Already exists"]
+    downloading = counts["Downloading"] + counts["Pulling fs layer"] + counts["Waiting"]
+    queued = counts["Download complete"] + counts["Verifying Checksum"]
+    parts = [f"{done}/{len(layers)} layers complete"]
+    if counts["Extracting"]:
+        parts.append(f"{counts['Extracting']} extracting")
+    if queued:
+        parts.append(f"{queued} downloaded, waiting to extract")
+    if downloading:
+        parts.append(f"{downloading} downloading")
+    text = ", ".join(parts)
+    if downloading:
+        return text, True
+    if counts["Extracting"] or queued:
+        return text + " — EXTRACTION: no bytes are expected on the pipe now", False
+    return text, True
 
 
 @contextmanager
@@ -194,13 +248,73 @@ def compose_cmd(*args: str) -> list:
             "--env-file", str(RUNDIR / ".env"), *args]
 
 
+PROBE_HOSTS = ("gsj-demo-polar-rollout", "gsj-demo-polar-gateway", "gsj-demo-receiver")
+PROBE_TIMEOUT_EXIT = 124           # `timeout`'s own convention: the probe did not run to its end
+PROBE_REAP_S = 30.0                # how long a `finally` keeps trying to remove a killed run's container
+
+
+def reap_container(name: str, wait_s: float = PROBE_REAP_S) -> bool:
+    """Remove a named container a killed `docker run` client left to the
+    daemon — and keep trying for a bound: on a copy-on-create daemon the
+    create is still in flight when the client dies and the container
+    appears only when the copy ends (library CP-96's proof: a `rm -f` a
+    second after the kill found nothing; the container turned up `Created`
+    four minutes later). True when it is gone or never appeared in time."""
+    started = time.monotonic()
+    while True:
+        if run(["docker", "rm", "-f", name], capture_output=True).returncode == 0:
+            return True
+        if time.monotonic() - started >= wait_s:
+            return False
+        time.sleep(2)
+
+
+def container_running(name: str) -> bool:
+    proc = run(["docker", "inspect", "--format", "{{.State.Running}}", name],
+               capture_output=True)
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
 def in_net_python(code: str, timeout: float = 600.0) -> subprocess.CompletedProcess:
     """Run a python snippet on the estate network (the Polar leg publishes
-    no host ports — from outside, you join the network; so does this script)."""
-    return run(["docker", "run", "--rm", "--network", NETWORK,
-                "--add-host", "host.docker.internal:host-gateway",
-                POLAR_IMAGE, "python", "-c", code],
-               capture_output=True, timeout=timeout)
+    no host ports — from outside, you join the network; so does this script).
+    Library CP-96, the round-four class: this used to `docker run --rm` the
+    465 MiB Polar image under a hard timeout, and on a copy-on-create
+    storage driver (vfs) the create alone outlasted it — a bare
+    `subprocess.TimeoutExpired` traceback with the estate underneath
+    healthy, three times in two containers; and the killed `docker run
+    --rm` never fired its --rm, so every failed probe left a `Created`
+    container behind. Now: `docker exec` into one of this estate's own
+    Polar containers when one is running (nothing is created, nothing can
+    leak); only with none running does it fall back to a NAMED `docker
+    run` that a `finally` removes; and a timeout comes back as exit
+    PROBE_TIMEOUT_EXIT with a sentence — never as a traceback."""
+    host = next((c for c in PROBE_HOSTS if container_running(c)), None)
+    if host:
+        cmd, cleanup = ["docker", "exec", host, "python", "-c", code], None
+        via = f"`docker exec {host}` (this estate's own container, already on {NETWORK})"
+    else:
+        cleanup = f"gsj-demo-probe-{os.getpid()}"
+        cmd = ["docker", "run", "--name", cleanup, "--network", NETWORK,
+               "--add-host", "host.docker.internal:host-gateway",
+               POLAR_IMAGE, "python", "-c", code]
+        via = f"a `docker run` of {POLAR_IMAGE} named {cleanup} (removed after)"
+    reaped = True
+    try:
+        return run(cmd, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if cleanup:                    # a killed `docker run --rm` never fires its --rm
+            reaped = reap_container(cleanup)
+        return subprocess.CompletedProcess(
+            cmd, PROBE_TIMEOUT_EXIT, "",
+            f"the probe timed out after {timeout:.0f} s via {via} — on a copy-on-create "
+            "storage driver (vfs) creating a container from a large image alone can take "
+            "minutes; the estate underneath may be perfectly healthy"
+            + ("" if reaped else f"; the daemon is still creating {cleanup} — it will appear as "
+                                 f"`Created` when the copy ends: `docker rm -f {cleanup}` removes it"))
+    finally:
+        if cleanup and reaped:
+            run(["docker", "rm", "-f", cleanup], capture_output=True)
 
 
 # ---------------------------------------------------------------- preflights
@@ -219,6 +333,16 @@ def check_docker() -> None:
     if probe.returncode != 0:
         die("`docker compose` (v2 plugin) is missing.",
             "install the Compose plugin (https://docs.docker.com/compose/install/) and re-run")
+    driver = run(["docker", "info", "--format", "{{.Driver}}"], capture_output=True)
+    if driver.returncode == 0 and driver.stdout.strip() in COPY_ON_CREATE_DRIVERS:
+        # library CP-96 (round four): a post-mortem turned into a warning at
+        # the first Docker call — the same daemon that answered "version"
+        say(f"docker — storage driver {driver.stdout.strip()!r}: every container is a full "
+            "COPY of its image, not a layer over it — each episode's sandbox container "
+            "copies the harness image (measured ~13 GB per container and ~60 GB of image "
+            "growth at round four), a create takes minutes, and disk fills fast. The cure "
+            "is the daemon, not this script: a data root on ext4/xfs with overlay2 (a "
+            "nested daemon: `-v /var/lib/docker`). Continuing — slowly.")
 
     probe = run(["docker", "run", "--rm", "alpine", "true"], capture_output=True)
     if probe.returncode != 0:
@@ -425,36 +549,63 @@ def ensure_image(image: str, what: str) -> None:
         return
     say(f"images — pulling {image} ({what}) — docker's progress follows; a large layer on a "
         f"slow pipe prints nothing until it lands, so a heartbeat every {PULL_HEARTBEAT_S:.0f}s "
-        "says whether this host's pipe is moving (README: 'The pull that is healthy and silent')")
-    result: dict = {}
+        "says which phase the layers are in and whether this host's pipe is moving "
+        "(README: 'The pull that is healthy and silent')")
+    layers: dict = {}
+    errors: list = []
+    cmd = ["docker", "pull", image]
+    try:
+        proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        proc = None
+        errors.append(f"{type(exc).__name__}: {exc}")
 
-    def worker() -> None:
+    def drain_stderr() -> None:
         try:
-            result["proc"] = run(["docker", "pull", image], stderr=subprocess.PIPE)
-        except BaseException as exc:  # noqa: BLE001 — surfaced as a failed pull
-            result["proc"] = subprocess.CompletedProcess(["docker", "pull", image], 1, "",
-                                                         f"{type(exc).__name__}: {exc}")
+            errors.append(proc.stderr.read() or "")
+        except (OSError, ValueError):
+            pass
 
-    puller = threading.Thread(target=worker, daemon=True)
-    puller.start()
-    started, rx0 = time.monotonic(), host_rx_bytes()
-    while True:
-        puller.join(PULL_HEARTBEAT_S)
-        if not puller.is_alive():
-            break
-        rx1 = host_rx_bytes()
-        if rx0 is None or rx1 is None:
-            moved = "this host's byte counters are not readable here"
-        elif rx1 - rx0 > 0:
-            moved = f"this host received {_human(rx1 - rx0)} in the last {PULL_HEARTBEAT_S:.0f}s — the pipe is moving"
-        else:
-            moved = (f"this host received NOTHING in the last {PULL_HEARTBEAT_S:.0f}s — before killing "
-                     "anything, the three checks in the README ('The pull that is healthy and silent')")
-        rx0 = rx1
-        elapsed = int(time.monotonic() - started)
-        say(f"images — still pulling {image}: {elapsed // 60}m{elapsed % 60:02d}s elapsed; {moved} "
-            "(a liveness signal for the pipe, not the pull's own byte count)")
-    pull = result["proc"]
+    def drain_stdout() -> None:
+        try:
+            for line in proc.stdout:
+                print(line, end="" if line.endswith("\n") else "\n", flush=True)
+                pull_phase_tally(layers, line)
+        except (OSError, ValueError):
+            pass
+
+    if proc is not None:
+        drainers = [threading.Thread(target=t, daemon=True) for t in (drain_stderr, drain_stdout)]
+        for t in drainers:
+            t.start()
+        started, rx0 = time.monotonic(), host_rx_bytes()
+        while True:
+            try:
+                proc.wait(timeout=PULL_HEARTBEAT_S)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            rx1 = host_rx_bytes()
+            where, expects_bytes = pull_phase_summary(layers)
+            if rx0 is None or rx1 is None:
+                moved = "this host's byte counters are not readable here"
+            elif rx1 - rx0 > 0:
+                moved = f"this host received {_human(rx1 - rx0)} in the last {PULL_HEARTBEAT_S:.0f}s — the pipe is moving"
+            elif not expects_bytes:
+                moved = (f"this host received NOTHING in the last {PULL_HEARTBEAT_S:.0f}s — as expected "
+                         "while the daemon extracts (watch the daemon's data root grow instead: "
+                         "`df -h` on it, not `docker system df`)")
+            else:
+                moved = (f"this host received NOTHING in the last {PULL_HEARTBEAT_S:.0f}s — before killing "
+                         "anything, the three checks in the README ('The pull that is healthy and silent')")
+            rx0 = rx1
+            elapsed = int(time.monotonic() - started)
+            say(f"images — still pulling {image}: {elapsed // 60}m{elapsed % 60:02d}s elapsed; {where}; "
+                f"{moved} (a liveness signal for the pipe, not the pull's own byte count)")
+        for t in drainers:                      # the last lines land before the verdict
+            t.join(timeout=5)
+    pull = subprocess.CompletedProcess(cmd, proc.returncode if proc is not None else 1, "",
+                                       "".join(errors))
     if pull.stderr:
         print(pull.stderr, file=sys.stderr, end="" if pull.stderr.endswith("\n") else "\n", flush=True)
     if pull.returncode == 0:
@@ -993,8 +1144,9 @@ def bringup(*args: str) -> None:
             "block above names what it found, what it expected, and what to do.",
             f"fix what it names and re-run ./bootstrap.py {verb} — every phase is "
             "idempotent. If it names a bring-up flag this script does not pass "
-            "(--overwrite-repos, --rebuild, --retarget and --forgejo-image <ref> are "
-            "forwarded from ./bootstrap.py up; others are not), either pass one of those, run "
+            "(--overwrite-repos, --rebuild, --retarget, --forgejo-image <ref> and "
+            "--ingest-timeout <seconds> are forwarded from ./bootstrap.py up; others are "
+            "not), either pass one of those, run "
             "`./bootstrap.py down --wipe` for a fresh estate, or run the tool "
             "directly: python -m gsj_rollout.estate up --help")
 
@@ -1146,7 +1298,17 @@ def polar_up(rec: dict, recreate: bool = False) -> None:
         "print('rollout ok' if ok_r else 'rollout NOT READY',"
         "'| receiver ok' if ok_g else '| receiver NOT READY',flush=True)\n"
         "sys.exit(0 if ok_r and ok_g else 1)\n")
-    if in_net_python(code, timeout=90).returncode != 0:
+    probe = in_net_python(code, timeout=90)
+    if probe.returncode == PROBE_TIMEOUT_EXIT:
+        # the probe, not the estate, failed: say so and go on (library CP-96)
+        say(f"polar — the readiness probe could not run: {probe.stderr.strip()}. The three "
+            "containers are up (`docker compose -p " + POLAR_PROJECT + " ps`); this is a "
+            "check, not a phase — the estate stands. Verify by hand: `docker exec "
+            "gsj-demo-polar-rollout python -c \"import httpx;print(httpx.get('http://"
+            f"{ROLLOUT_HOST}:{ports['rollout']}/health').json())\"` should print "
+            "status ok with nodes >= 1; ./bootstrap.py status re-checks nothing but shows "
+            "the containers")
+    elif probe.returncode != 0:
         die("the Polar leg did not come up (rollout /health with a registered node, "
             "and a listening receiver, within 60 s).",
             "docker logs gsj-demo-polar-rollout / gsj-demo-polar-gateway / "
@@ -1154,7 +1316,8 @@ def polar_up(rec: dict, recreate: bool = False) -> None:
             "no node usually means the gateway crashed (the receiver's log opens with "
             "the library's `run Polar's two processes yourself` block: not for you — "
             "those two ARE the containers beside it)")
-    say("polar — rollout server reports its gateway node; receiver is listening")
+    else:
+        say("polar — rollout server reports its gateway node; receiver is listening")
     (ESTATE / DIGEST_FILE_NAME).write_text(estate_digest() + "\n")
 
 
@@ -1167,10 +1330,9 @@ def check_engine(url: str, model: str) -> str:
         "ids=[m.get('id') for m in r.json().get('data',[])]\n"
         "print(','.join(ids))\n"
         f"sys.exit(0 if {model!r} in ids else 3)\n")
-    try:
-        proc = in_net_python(code, timeout=30)
-    except subprocess.TimeoutExpired:
-        return "UNREACHABLE"
+    proc = in_net_python(code, timeout=30)
+    if proc.returncode == PROBE_TIMEOUT_EXIT:
+        return f"UNREACHABLE — {proc.stderr.strip()}"
     if proc.returncode == 0:
         return "ok"
     if proc.returncode == 3:
@@ -1179,6 +1341,78 @@ def check_engine(url: str, model: str) -> str:
 
 
 # -------------------------------------------------------------------- status
+
+RECIPE_FILE_NAME = "submit.sh"
+
+
+def submit_recipe(demo: dict, rec: dict) -> str:
+    """The one-liner that submits an episode — derived from the record the
+    moment it holds the ports (library CP-96, F-96)."""
+    corpus = corpus_path(demo)
+    return (f"  docker run --rm --network {NETWORK} \\\n"
+            f"    -v {WORK}/estate:/estate -v {WORK}/runs/{RUN}/.env:/estate/.env:ro \\\n"
+            f"    -v {corpus}:/corpus -e GSJ_PINS_PATH=/estate/pins.gsj.json \\\n"
+            f"    {POLAR_IMAGE} \\\n"
+            f"    gsj-rollout submit --config /estate/rollout.yaml \\\n"
+            f"      --from-bank /corpus/taskbank.parquet --row 0")
+
+
+def write_submit_recipe(demo: dict, rec: dict) -> Path:
+    ESTATE.mkdir(parents=True, exist_ok=True)
+    out = ESTATE / RECIPE_FILE_NAME
+    body = "\n".join(line[2:] if line.startswith("  ") else line
+                     for line in submit_recipe(demo, rec).splitlines())
+    out.write_text("#!/bin/sh\n# the demo's submit one-liner (row 0 of the taskbank; "
+                   "--row N picks another; --task-id <id> runs a second episode beside one)\n"
+                   "# written by ./bootstrap.py up the moment it became derivable — "
+                   "./bootstrap.py status reprints it\n" + body + ' "$@"\n')
+    out.chmod(0o755)
+    say(f"recipe — the submit one-liner is on disk at {out} (survives a later phase failing)")
+    return out
+
+
+def partial_record_rows(rec: dict) -> str:
+    """The bring-up's record after an `up` that did not finish: one row per
+    service, saying reached / not reached — the library's own `status`
+    shape (CP-94), mirrored for the demo's other code path."""
+    fj = rec.get("forgejo") or {}
+    compose_mcp = (rec.get("compose") or {}).get("mcp") or {}
+    mcp = rec.get("mcp")
+    rows = ["\nthe bring-up's record is PARTIAL — the last `up` stopped before the estate was whole:"]
+    if fj:
+        rows.append(f"  forgejo    {fj.get('container_url', '?')}     case repos under "
+                    f"/{fj.get('owner', '?')}/   (host: {fj.get('url', '?')})")
+    else:
+        rows.append("  forgejo    not reached (the bring-up stopped before Forgejo stood)")
+    if mcp:
+        rows.append(f"  mcp        {mcp.get('container_url', '?')}        retrieval; /health for "
+                    f"state   (host: {mcp.get('url', '?')})")
+    elif compose_mcp:
+        h = None
+        if compose_mcp.get("port"):
+            url = f"http://127.0.0.1:{compose_mcp['port']}/health"
+            try:
+                import urllib.request
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    h = json.loads(resp.read().decode(errors="replace"))
+            except Exception:  # noqa: BLE001 — a diagnostic never crashes
+                h = None
+        state = (f"/health says state={h.get('state')}" if isinstance(h, dict)
+                 else "/health does not answer")
+        rows.append(f"  mcp        created ({compose_mcp.get('image', '?')}), NOT recorded ready — "
+                    f"the bring-up stopped in or before its readiness wait; {state}")
+    else:
+        rows.append("  mcp        not reached (the bring-up stopped before the retrieval service)")
+    if rec.get("ports"):
+        p = rec["ports"]
+        rows.append(f"  rollout    http://{ROLLOUT_HOST}:{p.get('rollout')}   gateway "
+                    f"http://{GATEWAY_HOST}:{p.get('gateway')}   receiver "
+                    f"http://{RECEIVER_HOST}:{p.get('receiver')}")
+    else:
+        rows.append("  polar leg  not reached (no ports recorded — the bring-up stopped before "
+                    "its config; the Polar containers above, if any, are from an earlier `up`)")
+    return "\n".join(rows)
+
 
 def print_status(demo: "dict | None", engine_state: "str | None",
                  rec: "dict | None", active: "str | None" = None) -> None:
@@ -1202,6 +1436,13 @@ def print_status(demo: "dict | None", engine_state: "str | None",
         print(f"\n(no bring-up record at {RUNDIR / 'run.json'}"
               + (" yet — it lands once the library's bring-up stands Forgejo up)" if active
                  else " — ./bootstrap.py up)"))
+    elif not (rec.get("forgejo") and rec.get("mcp") and rec.get("ports")):
+        # library CP-96 (F-94): the record a failed `up` leaves behind holds
+        # the phases the bring-up reached and nothing after — report them;
+        # `status` used to die on KeyError 'mcp' in exactly this state
+        print(partial_record_rows(rec))
+        print(f"\nwhat to do: re-run ./bootstrap.py up (resumable — every phase before the "
+              "one that failed is recorded and reused; its REFUSED block names the rest)")
     else:
         fj, mcp, ports = rec["forgejo"], rec["mcp"], rec["ports"]
         owner = fj["owner"]
@@ -1253,34 +1494,35 @@ the endpoint must satisfy (the library's CP-04' engine legs):
     server's generation defaults ARE the sampling policy — pin them
     (e.g. vLLM --generation-config) or your rollouts sample at whatever
     the engine happens to default to.""")
-    if demo is not None and rec is not None:
-        corpus = corpus_path(demo)
-        read_env = rec["forgejo"]["read_token_env"]   # follows the corpus's owner
+    if demo is not None and rec is not None and rec.get("forgejo") and rec.get("ports"):
         rows = (rec.get("corpus") or {}).get("taskbank_rows") or "?"
         last = rows - 1 if isinstance(rows, int) else "?"
         print(f"""
 submit one episode (the README's walkthrough reads it afterwards). The estate
 requires sign-in for read; submit presents the read token by NAME
-({read_env} — the name follows your corpus's owner) and reads its VALUE from
+({rec['forgejo']['read_token_env']} — the name follows your corpus's owner) and reads its VALUE from
 the run's .env, mounted read-only beside the config it reads (library 0.1.7's
 seam, inside this image: read, never exported — no subshell, nothing sourced):
-  docker run --rm --network {NETWORK} \\
-    -v {WORK}/estate:/estate -v {WORK}/runs/{RUN}/.env:/estate/.env:ro \\
-    -v {corpus}:/corpus -e GSJ_PINS_PATH=/estate/pins.gsj.json \\
-    {POLAR_IMAGE} \\
-    gsj-rollout submit --config /estate/rollout.yaml \\
-      --from-bank /corpus/taskbank.parquet --row 0
+{submit_recipe(demo, rec)}
   (--row 0 is the bank's first row — this bank has {rows} rows, 0–{last}; the README's
    walkthrough runs --row 2, the episode it explains, then a precedent row for the
    decisions tool; rows are sorted by case, timestep and prompt id)
 one episode at a time under a fixed task id (a second concurrent submit is
-refused 409 — add --task-id <another>); ./bootstrap.py status reprints this.
+refused 409 — add --task-id <another>); ./bootstrap.py status reprints this,
+and the same one-liner is on disk at {ESTATE / RECIPE_FILE_NAME} (written the
+moment it became derivable — it survives a later phase failing).
 
 then read it (the receiver archived it under work/traces/):
   ./read.py                      what landed, accepted and quarantined
   ./read.py show                 the latest episode, as a transcript
   ./read.py quarantine           why anything was rejected, explained
 and before spending episodes on a new endpoint:  ./preflight.py""")
+    elif rec is not None:
+        recipe = ESTATE / RECIPE_FILE_NAME
+        print(f"\nsubmit recipe: " + (f"on disk at {recipe} (derived before the phase that failed)"
+                                       if recipe.is_file() else
+                                       "not derivable yet — the bring-up stopped before the "
+                                       "record held the ports; re-run ./bootstrap.py up"))
 
 
 # ------------------------------------------------------------------ commands
@@ -1346,8 +1588,17 @@ def _cmd_up(args) -> None:
         # own pin is a tag on codeberg, and a tag's platform manifests can
         # vanish under it (F-78) — the value is any pullable reference
         forwarded += ["--forgejo-image", args.forgejo_image]
+    if args.ingest_timeout is not None:
+        # the flag the library's own REFUSED block prescribes (library CP-96,
+        # F-95): a cold embed on a contended CPU host outlasts 1800 s
+        forwarded += ["--ingest-timeout", str(args.ingest_timeout)]
     bringup("up", "--answers", str(answers), "-y", *forwarded)
     rec = load_run()
+    # the submit recipe is DERIVABLE now (the record has the ports and the
+    # token name): write it to disk before the Polar leg, so a later phase
+    # failing leaves it where `status` and a reader can find it (library
+    # CP-96, F-96 — two strangers never got the final printout)
+    write_submit_recipe(demo, rec)
     digest_file = ESTATE / DIGEST_FILE_NAME
     served_digest = digest_file.read_text().strip() if digest_file.is_file() else None
     engine_container_url = containerize_rollout_yaml(demo, rec)
@@ -1424,6 +1675,11 @@ def main() -> None:
                     help="forwarded to the bring-up: the Forgejo image, any pullable "
                          "reference — the route around a registry that lost the pinned "
                          "tag's manifests (F-78; README 'Historical')")
+    up.add_argument("--ingest-timeout", metavar="SECONDS", type=float, default=None,
+                    help="forwarded to the bring-up: seconds each readiness wait for the "
+                         "retrieval service may take, on the process's own clock (the "
+                         "library's default is 1800; a cold embed on a contended CPU host "
+                         "— a laptop running four containers — needs more; F-95)")
     up.set_defaults(func=cmd_up)
     sub.add_parser("status", help="what is running, where, how to stop"
                    ).set_defaults(func=cmd_status)

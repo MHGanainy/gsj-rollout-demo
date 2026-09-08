@@ -16,7 +16,11 @@ Probes run HOST-side against config.yaml's base_url exactly as written.
 (Container-side reachability — the path episodes actually use — is checked
 by `./bootstrap.py up`'s engine line.)
 
-Exit 0: nothing fatal found. Exit 1: at least one FAIL.
+Exit codes: 0 — no [FAIL] row (warnings are the limits of what an API can
+see); 1 — at least one [FAIL] row, or the config could not be read. Before
+`./bootstrap.py up` has run on a non-reference model the `end-of-turn id`
+row is a [warn], not a [FAIL] (the derivation has not run yet — `up` runs
+it), so a healthy endpoint exits 0 both before and after `up`.
 """
 
 import argparse
@@ -309,6 +313,20 @@ def main() -> int:
         row(OK, "end-of-turn id",
             f"the served template terminates assistant turns with "
             f"[{eot}] ({derived['eot_text']!r}) — matches {eot_src}")
+    elif not pins_path.is_file() and "end_of_turn_token_id" not in cfg:
+        # library CP-96 (F-97): no pins file = the derivation has not run;
+        # the cure that wrote the id into config.yaml contradicted the
+        # README in bold ("the tool wins by proximity") — not offered here
+        row(WARN, "end-of-turn id",
+            f"the served template terminates assistant turns with "
+            f"[{derived['eot_id']}] ({derived['eot_text']!r}); the builder would split "
+            f"at [{eot}] (from {eot_src}) — but the derivation has not run yet: "
+            f"no {pins_path.name} at {pins_path.parent}.\n"
+            f"what to do: nothing — ./bootstrap.py up derives [{derived['eot_id']}] from "
+            "the endpoint and writes it into work/estate/rollout.yaml; re-run this "
+            "preflight after `up` and this row settles. Do NOT set "
+            "end_of_turn_token_id in config.yaml: an explicit value overrides the "
+            "derivation you are about to test.")
     else:
         row(FAIL, "end-of-turn id",
             f"the served template terminates assistant turns with "

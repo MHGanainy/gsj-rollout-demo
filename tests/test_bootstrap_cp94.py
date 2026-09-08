@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import FakePull
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -112,12 +114,11 @@ def test_ensure_image_beats_with_elapsed_and_host_bytes_during_a_slow_pull(monke
     monkeypatch.setattr(bootstrap, "host_rx_bytes", rx)
     monkeypatch.setattr(bootstrap, "image_present", lambda image: False)
 
-    def fake_run(cmd, **kw):
+    def fake_popen(cmd, **kw):                      # CP-96: the streaming seam
         assert cmd == ["docker", "pull", "example.invalid/big:1"]
-        time.sleep(0.5)
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+        return FakePull(cmd, 0, delay=0.5)
 
-    monkeypatch.setattr(bootstrap, "run", fake_run)
+    monkeypatch.setattr(bootstrap, "popen", fake_popen)
     bootstrap.ensure_image("example.invalid/big:1", "a test image")
     out = capsys.readouterr().out
     beats = [line for line in out.splitlines() if "still pulling example.invalid/big:1" in line]
@@ -130,8 +131,7 @@ def test_ensure_image_heartbeat_says_nothing_moved_and_points_at_the_three_check
     monkeypatch.setattr(bootstrap, "PULL_HEARTBEAT_S", 0.15)
     monkeypatch.setattr(bootstrap, "host_rx_bytes", lambda: 7)
     monkeypatch.setattr(bootstrap, "image_present", lambda image: False)
-    monkeypatch.setattr(bootstrap, "run", lambda cmd, **kw: (time.sleep(0.4),
-                                                             subprocess.CompletedProcess(cmd, 1, "", "no such host"))[1])
+    monkeypatch.setattr(bootstrap, "popen", lambda cmd, **kw: FakePull(cmd, 1, stderr="no such host", delay=0.4))
     with pytest.raises(SystemExit):
         bootstrap.ensure_image("example.invalid/big:1", "a test image")
     out = capsys.readouterr()

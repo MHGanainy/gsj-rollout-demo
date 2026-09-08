@@ -53,14 +53,29 @@ repo learned that as
 - **Install**: clone 1.7 s; venv + `pip install` from PyPI **≈ 40 s
   cold** (measured at library CP-81; two strangers on 2026-09-06 (UTC)
   measured 36.6 s and 63.3 s on slow pipes) — 5.5 s at library CP-61 on a
-  fast pipe (cache state not recorded). You bring Docker with the `docker compose`
+  fast pipe (cache state not recorded). **On a slow pipe the install line
+  fails outright** before anything else has run: pip's default 15 s read
+  timeout dies mid-way through pyarrow's 46.8 MB wheel with a thirty-line
+  `ReadTimeoutError` traceback and no retry hint (round four, 2026-09-07:
+  two strangers, at 6.7 MB and 15.7 MB in). The cure is pip's own:
+  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.11' pyarrow`
+  — the same command with two flags; an unchanged retry also recovers when
+  the drop was transient. `docker pull` has three bullets of this guidance
+  below; the install needed one. You bring Docker with the `docker compose`
   plugin (Compose V2 or later), Python >= 3.12 and git — the exact
   prerequisite line is in "Run it" below.
-- **Disk**: **~6 GB** of images (measured at library CP-61 on
-  Apple Silicon: the daemon grew 5.4 GB for the four images, whose sizes
-  sum to 6.1 GB — the pull transfers less; an earlier README said 3.5 GB —
-  that was the compressed estimate, not disk). `work/` after one episode:
-  10–14 MB.
+- **Disk**: **~6 GB** of images **on an overlay storage driver**
+  (measured at library CP-61 on Apple Silicon: the daemon grew 5.4 GB for
+  the four images, whose sizes sum to 6.1 GB — the pull transfers less; an
+  earlier README said 3.5 GB — that was the compressed estimate, not disk).
+  `work/` after one episode: 10–14 MB. **On a copy-on-create driver
+  (`vfs`) the figure is a different order of magnitude**: every container is
+  a full copy of its image, not a layer over it — round four measured
+  ~60 GB of root-filesystem growth for what the daemon accounted as 3.7 GB
+  of images, and **~13 GB per sandbox container** of the 731 MB harness
+  image, each create taking minutes (b2: 234 GB → 311 GB after six). `up`
+  names the driver at its first Docker call since library CP-96; this
+  README's `vfs` cure below is priced accordingly.
 - **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI — the cold install figure quoted under **Install** above — `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
   image pulls, then the library's bring-up (Forgejo, the owner and its
@@ -173,8 +188,10 @@ repo learned that as
   alpine true` is the check (a plain `docker pull debian:stable-slim`
   succeeds on such a daemon, so a pull proves nothing), the cure is the
   daemon (a nested daemon needs its data root on a volume, `-v
-  /var/lib/docker`, or the `vfs` storage driver), and `docker save/load`
-  fails on the very same layers.
+  /var/lib/docker` — prefer this: `vfs` also cures it but costs a full
+  image copy per container, ~13 GB and minutes per sandbox, and blows
+  Polar's 600 s sandbox-create budget on a busy host — round four), and
+  `docker save/load` fails on the very same layers.
 - **The pull that is healthy and silent** (measured 2026-09-07, round
   three: one stranger saw **21 minutes without a line** on a working pull
   of the retrieval image at ~155 KB/s and had the `docker pull` PID in hand,
@@ -184,11 +201,23 @@ repo learned that as
   nothing until it lands — the "~4 min" above is a fast pipe. Since
   library CP-94 `up` prints a heartbeat once a minute during a pull
   (elapsed time, and whether this host received bytes in the last minute),
-  and `./bootstrap.py status` says `ACTIVE` while an `up` runs. Before you
+  and `./bootstrap.py status` says `ACTIVE` while an `up` runs. **Since
+  library CP-96 the heartbeat also names the layer phase** — `N/M layers
+  complete, K extracting, J downloading` — and says when **no bytes are
+  expected**: after every layer prints `Download complete` the daemon
+  extracts, which moves the disk and not the pipe; round four's heartbeat
+  said "26.0 KiB in the last 60s — the pipe is moving" through forty
+  minutes of that, and a stranger counted `Download complete` against
+  `Pull complete` by hand to tell a phase change from a stall. Before you
   conclude a silent pull hung, three checks, in order: (1) the heartbeat
   (or `./bootstrap.py status`) — if the host is still receiving bytes it
-  is slow, not hung; (2) `docker system df` twice a minute apart — the
-  daemon's used space grows as layers land; (3) the two failure signatures
+  is slow, not hung, and if it says extraction, a quiet pipe is expected;
+  (2) `df -h` on the daemon's data root (`docker info --format
+  '{{.DockerRootDir}}'`) twice a minute apart — it grows as layers land
+  (**not** `docker system df`, which this README used to name: measured
+  flat through an actively progressing pull on Docker 29.8 — it accounts
+  an image only once the image is complete; `df -h /` moved 1–2 GB every
+  two minutes on the same host all night); (3) the two failure signatures
   in the bullet above (`Retrying in N seconds` / `unexpected EOF`, or
   `failed to extract` / `failed to mount`) — a hung pull eventually prints
   one, a healthy one never does. Only then kill it, and re-run `up`: the
@@ -348,7 +377,10 @@ cp config.yaml.example config.yaml   # then fill in the three values:
 library CP-64 closed the last amd64-only gap (platform fact 1 above).
 
 `up` runs, in order: **validate** the corpus (and stop loudly if it fails —
-nothing runs against an invalid tree) → pull the four images → derive
+nothing runs against an invalid tree) → pull the three ghcr.io images
+(the bring-up pulls Forgejo itself, a fourth — so the pull phase is not
+over when `bootstrap.py`'s three land; round four waited 92 minutes and
+then met a fourth pull) → derive
 **this estate's pins** from your corpus and your endpoint → hand your three
 values — and an external decisions fallback, if you kept one beside the
 corpus, as `--decisions-dir` — to **the library's own estate tool** (`python -m gsj_rollout.estate`,
@@ -404,7 +436,11 @@ These are written at the corpus root and belong with its data.
 ## Walkthrough: an episode, submitted and read
 
 You have just run `up` and its final printout ended with a `docker run`
-one-liner. This is what to do with it.
+one-liner. This is what to do with it. If a late phase failed and the
+printout never came (round four: two strangers), the same one-liner is on
+disk at `work/estate/submit.sh` — written the moment it became derivable,
+before the Polar leg — and `./bootstrap.py status` reprints it; `status`
+reports a partial estate rather than crashing on it since library CP-96.
 
 **0 — preflight your endpoint (once per endpoint, before spending episodes):**
 
@@ -412,11 +448,17 @@ You may run it before `up` too, as soon as `config.yaml` is filled: every
 row except `tokenizer tail` answers then (that row waits for the pins `up`
 derives, and skips, saying so — a `[ -- ]` line naming the missing file),
 and on a non-reference model the `end-of-turn id` row settles only after
-`up` derives the id into `work/estate/rollout.yaml` — until then it compares
-against the Qwen3 default and fails. **Do not cure that pre-`up` FAIL by
-writing the id into `config.yaml`**: an explicit value there overrides the
-derivation you are about to test (a stranger nearly did; the derivation
-gave the same 248046 unaided). And after `up`, the `end-of-turn id` row
+`up` derives the id into `work/estate/rollout.yaml` — until then it is a
+`[warn]` saying the derivation has not run (since library CP-96; it used to
+be a `[FAIL]` whose second cure was the very thing the next sentence
+forbids — "the tool wins by proximity", a round-four stranger wrote, and
+nearly took it). **Do not cure a pre-`up` mismatch by writing the id into
+`config.yaml`**: an explicit value there overrides the derivation you are
+about to test (two strangers nearly did; the derivation gave the same
+248046 unaided). **Exit codes**: 0 when no row is `[FAIL]` (warnings are
+the limits of what an API can see), 1 when one is, or when `config.yaml`
+cannot be read — so a healthy endpoint exits 0 both before and after `up`,
+and the early run is safe under `set -e`. And after `up`, the `end-of-turn id` row
 reads `work/estate/rollout.yaml` — *what episodes run with* — not
 `config.yaml`: an edit to `config.yaml` changes nothing until the next
 `up` regenerates that file, and the row says which file it read
@@ -587,7 +629,10 @@ docker run --rm --network gsj-demo-net \
 `decision_census.searched` is `true` and `hits_returned` counts the
 paragraphs the agent read; whether it *cited* one is the `tokens_written`
 list — the reference model's measured record is the table under
-"Decisions", and a stranger's 27B wrote none either.
+"Decisions"; round three's two episodes on a stranger's 27B wrote none
+either, and round four's precedent-row episode on the same 27B wrote
+twelve, all grounded, none ungrounded — what a model writes is the
+episode's, not the model class's.
 
 ## Decisions
 
@@ -711,10 +756,19 @@ rather than merely documented.
 afford thirty where a real corpus is a different scale. The drop is 444 KB
 of XML; the retrieval service reads it, parses **313 units** out of it (244
 Randnummern and 69 whole sections — a Leitsatz, a Tenor, a title line) and
-embeds 317 pieces in about 5 seconds inside the container; the store on
-disk grows to 1.8 MB, and `work/` after two episodes is 10 MB. It costs
-`up` nothing you would notice: the whole from-nothing run below, decisions
-included, was **80 s**. For comparison, the real corpus the surface was
+embeds 317 pieces in about 5 seconds inside the container **on an idle
+Apple Silicon laptop with the native arm64 image**; the store on disk grows
+to 1.8 MB, and `work/` after two episodes is 10 MB. It costs `up` nothing
+you would notice there: the whole from-nothing run below, decisions
+included, was **80 s**. On a contended CPU host the same 317 pieces are
+minutes, not seconds — round four (a laptop running four nested-Docker
+containers at once) measured them inside a 90 s window on one host and
+could not measure them on another whose host slept mid-embed — and while
+they embed the bring-up's poll line names the collection being built
+(`building decisions: batch 1/1`, library CP-96); before that it read
+`2/2 embedded` and looked finished. The library's `--ingest-timeout`
+(default 1800 s, on the process's clock) is the budget, and
+`./bootstrap.py up --ingest-timeout <seconds>` forwards it. For comparison, the real corpus the surface was
 written against is 33,979 decisions and about 1.16 million pieces — hours,
 not seconds — which is why the library's `--decisions-dir` takes a
 directory and re-embeds the decisions collection alone when the drop
