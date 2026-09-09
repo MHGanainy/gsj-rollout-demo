@@ -308,3 +308,46 @@ that reads *removed*. MCP 0.5.0 and the sandbox pin carry unchanged payloads
 and were not recut. What this demo does not take from 0.1.13: `read.py` is
 untouched, so F-87 and F-92 stay parked on the export format bump — this
 sitting is a floor bump and an image cut, not the one that opens `read.py`.
+
+CP-102 (2026-09-09): the 0.1.14 wheel was published on PyPI at
+2026-09-09T15:26:57.092411Z; demo edits began at 2026-09-09T15:27:53Z (the stamp the patch
+script wrote, not memory). The host floor, remedies, `polar.Dockerfile`
+default and all three `docker run` recipes (step 1b's is CP-101's) now select
+0.1.14. A-28 requires this recut because the image carries CP-101's changed
+estate module: `up`'s `== run <name> ==` footer is conditional on the same
+fact its pins line tests, so on an estate whose pins in force cover the
+corpus — this demo's, once `bootstrap.py` has derived G1/G2 — the skeleton
+row says `G1/G2 EMPTY in it — NOT NEEDED on this estate: /p/pins.gsj.json already carries them (#your-pins is for a corpus or model those pins do not cover)`
+where 0.1.13 said `G1/G2 EMPTY until an inspected quarantined episode supplies them (#your-pins reads it)`
+twenty lines under a pins line claiming the opposite (a round-six reader of
+this README filed the pair). `gsj_rollout/` itself is byte-identical to
+0.1.13's but for the version literal. The build recipe used public
+`LIB_REF=v0.1.14` and PyPI `LIB_VERSION=0.1.14` and published
+`ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.14` for both platforms.
+
+Published index `sha256:9526f3f7090c4295752f36ff9766e1ae1358e02bfa38e553f8c507c26ea5e356`:
+
+- linux/amd64 `sha256:a7a498ab1b44f667198a6062a767d8a539f994933c1af8d52b6e6b8fd146b987`
+- linux/arm64 `sha256:dab8d7bf8aa667ded3ac9a05d39d7f065e198e05777b1929b20d795f9c2e5f43`
+
+Both child manifests were read anonymously and both images were pulled using
+an empty Docker authentication configuration. Both platform containers report
+0.1.14 and release source `8fb720729fb59b555d093e4441e89e4eba4d0a61`; their packaged
+estate (`c77d4f2f…`) and pipeline
+(`a291ec56…`) hashes equal the independently installed
+public PyPI wheel's, byte for byte. PiHarness subclasses BaseHarness; the
+installed estate carries `skeleton_footer_row` with both branches (called in
+the container with `covered=True` and `covered=False`, the two lines above),
+and every CP-98/CP-99 seam CP-100 listed is still present (`host_dial`, the
+nonce sentinel's three verdicts, the appended `host.docker.internal`, the
+EADDRINUSE UNMEASURED branch, the exec-127 guard, the reused-measurement
+label, the conditional skeleton, a `reap_container` that reads *removed*).
+MCP 0.5.0 and the sandbox pin carry unchanged payloads and were not recut.
+The fresh clone's episodes on this image: recorded in the library's printed CP-102 report — the clone is of this commit, run before the push. What this demo does not
+take from 0.1.14: `read.py` is untouched, so F-87 and F-92 stay parked on the
+export format bump — this sitting is a floor bump and an image cut, not the
+one that opens `read.py`. And what the LIBRARY does not carry at 0.1.14, so
+that this record does not imply it: `pi_harness.py`'s `| tee` still makes a
+pipeline's exit the step's (library row 110 — routed around on the library's
+pages with `-e TMPDIR`, which this demo's compose has always set, so door A
+never meets it), and `cli.py`'s serve NOTE still names only a `<checkout>`.
