@@ -33,6 +33,34 @@ is the other half: it shows a **trainer** how to train against an estate
 that already exists. *This* repo is for the person who has to get the
 estate — and wants to see what the agent did in it.)
 
+## Quickstart
+
+Everything below this block is the measured detail behind it. **Two
+preconditions**, both worth checking before you start:
+
+- `docker run --rm alpine true` **exits 0**. A daemon that answers `docker info`
+  and even pulls images can still be unable to *start* one — the pull is not the
+  check, the run is (two stranger runs died there).
+- Python >= 3.12, git, and Docker's `docker compose` plugin (Compose V2, the Go
+  plugin — not the legacy `docker-compose` v1).
+
+```bash
+mkdir -p gsj-demo && cd gsj-demo                 # the venv lands here, the clone beside it
+python3 -m venv .venv && . .venv/bin/activate    # PEP 668 systems refuse a bare pip install
+pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.13' pyarrow
+git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
+
+./synthetic/make_corpus.py                       # the worked corpus + thirty decisions
+cp config.yaml.example config.yaml               # fill in three values (corpus, base_url, model)
+./bootstrap.py validate && ./bootstrap.py up     # the estate
+```
+
+Then submit one episode and read it — the walkthrough's
+[step 1](#walkthrough-an-episode-submitted-and-read) prints the command with your
+own paths in it. Budget for the **image pulls**, which dominate a cold first run
+on a slow pipe: four images, ~4.05 GB compressed on the wire and ~6 GB on disk
+after extraction, of which the retrieval service alone is 2.65 GB.
+
 ## What to expect, measured
 
 The numbers below are measured, not estimated — most on one from-nothing
@@ -71,11 +99,15 @@ repo learned that as
   below; the install needed one. You bring Docker with the `docker compose`
   plugin (Compose V2 or later), Python >= 3.12 and git — the exact
   prerequisite line is in "Run it" below.
-- **Disk**: **~6 GB** of images **on an overlay storage driver**
-  (measured at library CP-61 on Apple Silicon: the daemon grew 5.4 GB for
-  the four images, whose sizes sum to 6.1 GB — the pull transfers less; an
-  earlier README said 3.5 GB — that was the compressed estimate, not disk).
-  `work/` after one episode: 10–14 MB. **On a copy-on-create driver
+- **Disk, and the wire — two different numbers.** **~6 GB** of images **on an
+  overlay storage driver, after extraction** (measured at library CP-61 on
+  Apple Silicon: the daemon grew 5.4 GB for the four images, whose sizes sum to
+  6.1 GB); **~4.05 GB compressed on the wire**, which is the one that governs
+  the clock, and within it the retrieval service is **2.65 GB — 44% of the
+  total in one image** (measured round six). One figure governs `df`, the other
+  governs how long you wait, and a round-six stranger extrapolated "on the order
+  of a day" from the disk figure before correcting itself: it read ~6 GB as a
+  download total, which it is not. `work/` after one episode: 10–14 MB. **On a copy-on-create driver
   (`vfs`) the figure is a different order of magnitude**: every container is
   a full copy of its image, not a layer over it. Round five measured it
   against an `overlay2` control — same door, same corpus, same row, the
@@ -88,9 +120,14 @@ repo learned that as
   of root-filesystem growth for what the daemon accounted as 3.7 GB of
   images. (Round four's "~13 GB per sandbox container" was inferred from
   that one host and is retired — the ratios above are what two controlled
-  pairs actually measured.) `up` names the driver at its first Docker call
-  since library CP-96 and prices it to this pair since library CP-99; this
-  README's `vfs` cure below is priced accordingly.
+  pairs actually measured.) **`up` prints this only when it finds a
+  copy-on-create driver**: since library CP-96 it reads the driver from its
+  first `docker info` and warns, priced to the pair above since library CP-99 —
+  so on `overlay2`, the good case, you correctly see **no driver line at all**
+  and there is nothing to do. (Round six: four strangers, all `overlay2`, zero
+  warnings; one of them went looking for the line this README had promised
+  unconditionally and filed its absence.) Check yours with `docker info
+  --format '{{.Driver}}'`; this README's `vfs` cure below is priced accordingly.
 - **`up`, cold on an empty docker host: ~4 min on the measured run, ~2.5 min where every image pulls natively; 80 s from a fresh clone where the images are already present** (measured at library CP-81: clone 0.1 s, venv + `pip install` from PyPI — the cold install figure quoted under **Install** above — `make_corpus.py` 0.05 s, `validate` 1.4 s, `up` 38 s — the estate, the corpus, and the thirty decisions embedded) — one uninterrupted
   from-nothing run (library CP-61, Apple Silicon, fast pipe): ~90 s of
   image pulls, then the library's bring-up (Forgejo, the owner and its
@@ -228,16 +265,24 @@ repo learned that as
   conclude a silent pull hung, three checks, in order: (1) the heartbeat
   (or `./bootstrap.py status`) — if the host is still receiving bytes it
   is slow, not hung, and if it says extraction, a quiet pipe is expected;
-  (2) `df -h` on the daemon's data root (`docker info --format
-  '{{.DockerRootDir}}'`) twice a minute apart — it grows as layers land
-  (**not** `docker system df`, which this README used to name: measured
-  flat through an actively progressing pull on Docker 29.8 — it accounts
-  an image only once the image is complete; `df -h /` moved 1–2 GB every
-  two minutes on the same host all night); (3) the two failure signatures
-  in the bullet above (`Retrying in N seconds` / `unexpected EOF`, or
-  `failed to extract` / `failed to mount`) — a hung pull eventually prints
-  one, a healthy one never does. Only then kill it, and re-run `up`: the
-  daemon resumes from the layers it kept.
+  (2) **`df --block-size=1M`** on the daemon's data root (`docker info --format
+  '{{.DockerRootDir}}'`) twice a minute apart — it grows as layers land.
+  **Megabytes, not `df -h`**: at this project's bandwidth a human-readable
+  `df -h` is blind, and this README used to prescribe it — round six measured a
+  flat `102G` twice while a `df -k` sampler on the same filesystem moved
+  **+214 MB/min**, and the reader nearly filed a disk regression against a
+  correct README. (Not `docker system df` either, which this README named before
+  that: measured flat through an actively progressing pull on Docker 29.8 — it
+  accounts an image only once the image is complete.) One caveat the check
+  needs: **on a shared data root `df` counts every tenant**, so it is only
+  attributable when the data root is on its own filesystem. (3) the failure
+  signatures in the bullet above — `Retrying in N seconds` **followed by** a run
+  that ends `unexpected EOF`, or `failed to extract` / `failed to mount`. Read
+  that first pair as a conjunction: **the retry line alone is the pull
+  recovering out loud, not a fault** — it was measured on healthy pulls that
+  completed, in three rounds out of three, and this README used to say a healthy
+  pull never prints it, one sentence before telling you to interrupt. Only then
+  kill it, and re-run `up`: the daemon resumes from the layers it kept.
 
 ## What a trajectory looks like
 
@@ -390,9 +435,16 @@ mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands H
                                      # the venv goes beside the clone, then `cd` back in.
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
-pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow   # the library + the taskbank's parquet
-                                                          # writer (add `pytest` to run the
-                                                          # regression suite, README's last section)
+pip install --timeout 120 --retries 5 \
+  'gsj-harness-rollout-server>=0.1.13' pyarrow   # the library + the taskbank's parquet writer
+                                                 # (add `pytest` to run the regression suite,
+                                                 # README's last section). The two flags are IN
+                                                 # this line on purpose: pip's default 15 s read
+                                                 # timeout dies mid-way through pyarrow's 46.8 MB
+                                                 # wheel on a slow pipe, and three strangers in
+                                                 # three rounds hit it with the cure sitting in a
+                                                 # paragraph they had already scrolled past. They
+                                                 # cost a fast pipe nothing.
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 
 ./synthetic/make_corpus.py        # the worked example: the corpus AND the thirty
@@ -541,10 +593,17 @@ The last two flags are load-bearing: the symmetric chat template
 is why multi-turn episodes reconstruct as ONE chain, and the pinned
 generation config IS your sampling policy — pi sends no sampling parameters.
 
-**1 — submit one episode** (the `up` printout's one-liner **with `--row 2`
-in place of its `--row 0`** — the printout names the bank's first row and
-says so under the one-liner since library CP-94; a stranger who copied it
-verbatim ran a different episode from the one this README explains. The
+**1 — submit one episode.** **Copy the fenced command below, not the `up`
+printout's one-liner**: they differ in one flag, and the fence is already
+correct. The printout (and `work/estate/submit.sh`) end in `--row 0`, which is
+a real episode — `case_mill@3`'s precedent prompt, the one step 3 runs — while
+this walkthrough explains **`--row 2`**, `case_orchard@2`, the transcript shown
+above. Neither is wrong and you need not edit anything; take the block below
+and the rest of this section describes what you get. (The printout has named
+the bank's first row and said so beneath itself since library CP-94, after a
+stranger copied it verbatim and ran a different episode from the one explained
+here; a round-six reader pointed out that a warning about a mismatch is not the
+same as not having one, which is what this paragraph now removes. The
 taskbank is what the bring-up built from your corpus — the printout's
 taskbank line says how many rows yours produced; the synthetic corpus makes
 six rows, numbered 0–5, sorted by case, timestep and prompt id, and **row 2**
@@ -584,6 +643,33 @@ refused with an opaque `409 Conflict` — pass `--task-id <another>` for a
 concurrent one, or wait. The README's example transcript is row 2,
 `case_orchard@2`; rows 1 and 5 are the skill-card tasks the floor model is
 apt to loop on.)
+
+**1b — the pair that shows the cutoff *binding*, not merely holding.** Row 2
+alone cannot tell you *where* the temporal cutoff is enforced: at `t=2` the
+case branch holds only two pages, so no later page **could** be retrieved
+whatever the retrieval service does. The two mechanisms — a checkout scoped to
+`T`, and a retrieval bound that filters by `T` — are indistinguishable on one
+row. **The same case at a second timestep separates them**, and this corpus is
+built for it. Run row 3 beside row 2:
+
+```bash
+docker run --rm --network gsj-demo-net \
+  -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
+  -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.13 \
+  gsj-rollout submit --config /estate/rollout.yaml \
+    --from-bank /corpus/taskbank.parquet --row 3 --task-id easement
+```
+
+Row 2 is `case_orchard@2`, row 3 is `case_orchard@4`, and the **1998 easement
+deed exists only on page 4**. So the t=4 episode can find, read and cite it and
+the t=2 episode cannot — `./read.py show` prints each hit's page and checks it
+against that episode's own timestep (`all <= timestep 2 (the cutoff holds)`),
+and `./read.py export`'s `page_census.pages_beyond_timestep` is `[]` on both.
+Same case, same corpus, same estate, one flag apart: the difference between the
+two transcripts is the retrieval bound doing its job. (The library's register
+carries this as its open row 107 — the pair had never been run by anyone
+outside the project through six stranger rounds, because nothing asked for it.)
 
 Polar starts a sandboxed episode container, the agent works the task
 against your endpoint and the estate's retrieval, and the finished trace is
@@ -1030,8 +1116,11 @@ the **last write attempt**; earlier attempts remain in each turn's calls/results
 Legacy unstamped/stamped archives, quarantine wrappers, current decision
 result envelopes and historical concatenated JSON hit objects remain readable.
 Malformed config/archive roots refuse with the file, expected shape and a
-recovery action. The regression suite is `python -m pytest -q tests` (needs
-`pip install pytest`, which the install line above does not bring);
+recovery action. The regression suite is `python3 -m pytest -q tests` (needs
+`pip install pytest`, which the install line above does not bring; `python3`
+rather than `python` because a stock Ubuntu >= 23.04 box has no `python` on
+PATH unless the venv from "Run it" is active, and this section is a long way
+from that activation — the same class of system the PEP 668 note names);
 [fixture provenance and limitations](tests/fixtures/README.md) distinguish
 real captures from synthetic message mutations. Phase 6 inherits this fixture
 contract; no grader or core helper has been added.
