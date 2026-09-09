@@ -65,7 +65,7 @@ repo learned that as
   broken package (round five: two more strangers lost their first
   install, one to each signature; cost of the second, one wrong
   diagnosis). The cure is pip's own, for both:
-  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.12' pyarrow`
+  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.13' pyarrow`
   — the same command with two flags; an unchanged retry also recovers when
   the drop was transient. `docker pull` has three bullets of this guidance
   below; the install needed one. You bring Docker with the `docker compose`
@@ -152,7 +152,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97)): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97) → 0.1.13 (library CP-100)): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -183,7 +183,7 @@ repo learned that as
 
   is byte-identical to what codeberg served (not a re-tag of another
   version — that would lie about provenance). This checkout's bootstrap
-  floors the library at `>=0.1.12` and refuses before the recipe would
+  floors the library at `>=0.1.13` and refuses before the recipe would
   matter — for it, the upgrade IS the cure; the recipe is for the demo
   checkout of the same era (`git checkout 13d579e`).
 - **Two pull outcomes that are not a missing manifest** (the 2026-09-06 (UTC)
@@ -338,19 +338,30 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
-Library 0.1.12 is the floor: it carries the gateway-host probe by `docker exec` into
-the run's own retrieval container (a probe that cannot run degrades with the cure
-named instead of aborting one file short of `rollout.yaml`), every readiness wait
-on the process's clock with the measured wait printed beside the budget, the
+Library 0.1.13 is the floor. It carries the gateway-host probe whose `measured`
+label finally means what it says — a sentinel answering a per-run nonce, dialled
+from a container on the run's network AND from this host, with only the candidate
+that returns the nonce on both legs accepted, `host.docker.internal` appended
+rather than tried first on nothing but resolving, and a gateway port the process
+cannot bind reported UNMEASURED instead of measured against somebody else's
+listener (a round-five stranger lost a whole run to the old label); a `docker
+exec` that cannot start the interpreter reported as a failure rather than as
+silence; six sites that no longer write a measurement's word over an
+inference; a storage-driver warning carrying numbers measured against a control;
+and the fallback probe's reaper actually waiting out its bound (library CP-98 +
+CP-99, released at CP-100). Under that: the gateway-host probe by `docker exec`
+into the run's own retrieval container (a probe that cannot run degrades with the
+cure named instead of aborting one file short of `rollout.yaml`), every readiness
+wait on the process's clock with the measured wait printed beside the budget, the
 collection being built on the poll line, `verify`'s skips counted apart from its
-passes, the pull heartbeat naming the layer phase, the storage-driver warning, and
+passes, the pull heartbeat naming the layer phase, and
 `work/runs/demo/pins.skeleton.json` — beside the run's OWN `rollout.yaml`, which is
 not the `work/estate/rollout.yaml` this walkthrough hands you (the estate writes
 three; a round-five stranger looked in the wrong one first) — with the G6 tail and
-end-of-turn id measured from the engine, and, since library CP-99, saying in the
-file whether the walk it starts is needed on this estate at all: here it is not,
-because `bootstrap.py` has already derived real G1/G2 into
-`work/estate/pins.gsj.json` (library CP-96 + CP-97, released at CP-97), on top of
+end-of-turn id measured from the engine, and saying in the file whether the walk it
+starts is needed on this estate at all: here it is not, because `bootstrap.py` has
+already derived real G1/G2 into `work/estate/pins.gsj.json` (library CP-96 +
+CP-97, released at CP-97), on top of
 `status` in three states, the sandbox image checked before any Docker call, the
 pull heartbeat and the pins line naming the approved sets left empty (library
 CP-94, released at CP-95), the native-platform and split pull refusals, partial-run
@@ -379,7 +390,7 @@ mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands H
                                      # the venv goes beside the clone, then `cd` back in.
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
-pip install 'gsj-harness-rollout-server>=0.1.12' pyarrow   # the library + the taskbank's parquet
+pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow   # the library + the taskbank's parquet
                                                           # writer (add `pytest` to run the
                                                           # regression suite, README's last section)
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
@@ -551,7 +562,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.12 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.13 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```
@@ -647,7 +658,7 @@ search them):
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.12 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.13 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 0 --task-id precedent
 ./read.py show            # the hits render as court, docket, Randnummer, the citation each admits

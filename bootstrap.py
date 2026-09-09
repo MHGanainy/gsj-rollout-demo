@@ -61,21 +61,25 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.12' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.12"   # library 0.1.12 inside (CP-97 cut): CP-96's exec probe + degrade, monotonic waits, verify skips, phase-naming heartbeat; CP-97's pins skeleton
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.13"   # library 0.1.13 inside (CP-100 cut): CP-98's reaper bound + CP-99's gateway probe (a per-run nonce, both legs dialled, host.docker.internal appended, a port it cannot bind UNMEASURED), the exec-127 branch, six sites that wrote a measurement's word over an inference, the re-measured vfs warning, the conditional pins skeleton
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.5.0"       # multi-arch; 0.5.0 = the decisions surface (library CP-79) —
                                                              # 0.4.x refuses the `decisions.path` key a drop needs (library wishlist 77)
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 12)         # CP-97: published CP-96's readiness probe by `docker exec`
-                             # that degrades instead of aborting, waits on the process's
-                             # clock, verify's skips counted apart, the phase-naming
-                             # heartbeat, the storage-driver warning, and the pins skeleton
-                             # `up` writes (ADR-0042); the pinned image carries the same wheel
+LIB_MIN = (0, 1, 13)         # CP-100: published CP-99's gateway-host probe, whose label
+                             # now means what it says — a sentinel answering a per-run
+                             # nonce, dialled from a container AND from this host, with
+                             # host.docker.internal appended rather than tried first and a
+                             # port it cannot bind reported UNMEASURED; the exec-127 branch;
+                             # six corrected `measured`-on-an-inference sites; the vfs
+                             # warning's measured numbers; the conditional pins
+                             # skeleton; and CP-98's reaper
+                             # bound. The pinned image carries the same wheel
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -382,18 +386,19 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.12' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.12 "
-            "ships the gateway-host probe by `docker exec` into the run's own container "
-            "(degrading instead of aborting), readiness waits on the process's clock, "
-            "verify's skips counted apart, the phase-naming pull heartbeat, the storage-"
-            "driver warning and the pins skeleton `up` writes (library CP-96 + CP-97, "
-            "published at CP-97).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.12' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.13 "
+            "ships a gateway-host probe whose 'measured' label means what it says (a "
+            "per-run nonce, both legs dialled, host.docker.internal appended rather than "
+            "first, a port it cannot bind reported UNMEASURED), a `docker exec` that "
+            "cannot start the interpreter reported as a failure, six corrected `measured` "
+            "sites, the vfs warning's measured numbers, a pins skeleton that says when "
+            "this estate does not need it, and the reaper's bound (library CP-98 + CP-99, published at CP-100).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.13' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -402,7 +407,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.12' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -796,12 +801,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.12' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.13' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.12' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.13' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -809,7 +814,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.12') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.13') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "

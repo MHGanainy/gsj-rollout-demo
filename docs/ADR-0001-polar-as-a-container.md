@@ -256,3 +256,55 @@ skeleton's name and format, the reaper's and the sleep-skew bounds, the
 this demo does not take from 0.1.12: `read.py` is untouched, so F-87 and
 F-92 stay parked on the export format bump — this sitting is a floor bump
 and an image cut, not the one that opens `read.py`.
+
+CP-100 (2026-09-09): the 0.1.13 wheel was published on PyPI at
+2026-09-09T03:44:57.425296Z; demo edits began at 2026-09-09T03:49:08Z (the stamp the patch
+script wrote, not memory). The host floor, remedies, `polar.Dockerfile`
+default and both `docker run` recipes now select 0.1.13. A-28 requires this
+recut because the image carries CP-98's and CP-99's changed estate module:
+the reaper reads *removed* off the CLI's stdout so its 30 s bound engages on
+a name the daemon has not created yet (CP-96 read an exit code that is 0 for
+a missing name too), and the gateway-host probe's label now means what it
+says — it binds a sentinel that answers a per-run nonce, dials every
+candidate from a container on the run's network AND from this host, and
+accepts only the candidate that returns the nonce on both legs, recording
+per candidate what answered each leg in `run.json`; `host.docker.internal`
+is appended rather than inserted first on nothing but resolving; a gateway
+port this process cannot bind is reported UNMEASURED, naming the port and
+`--gateway-host`, instead of measured against somebody else's listener; a
+`docker exec` that could not start the interpreter is a failure (exit 127
+with the message on stdout) rather than silence; six sites that wrote a
+measurement's word over an inference say what they are; the storage-driver
+warning carries a controlled pair's numbers instead of an inferred
+`~13 GB per container`; and the pins skeleton says when the pins in force
+already cover this corpus. **This cut also ends a mixed state**: this repo's
+`bootstrap.py` took the reaper fix at CP-99 (`f917295`) while the pinned
+image still carried 0.1.12's `estate.py`, so a demo-door reader would have
+run this repo's new code over the library's old code inside one image.
+The build recipe used public `LIB_REF=v0.1.13` and PyPI `LIB_VERSION=0.1.13`
+and published `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.13` for both
+platforms.
+
+Published index `sha256:f4a4cb2fcc5a1af185857b0bb3436420e3f551cedf499d14c228ec1358e2c4b7`:
+
+- linux/amd64 `sha256:cac4322266147b1efef2364d2395fca935702b5be37644cf120f0bf7142cc55d`
+- linux/arm64 `sha256:17abd169f7e18a2ac6f650c36b17467f3e91b084c2548cefb8f756a3986afa6e`
+
+Both child manifests were read anonymously and both images were pulled using
+an empty Docker authentication configuration. Both platform containers report
+0.1.13 and release source `91f99fd7fba073557ed8234aecbbe2b5275ab83a`; their packaged
+estate (`e3d3d8d6…`) and pipeline
+(`a291ec56…`) hashes equal the independently installed
+public PyPI wheel's, byte for byte. PiHarness subclasses BaseHarness, and the
+installed estate carries `host_dial`, the nonce sentinel and its three
+verdicts (`our sentinel` / `a foreign listener` / `nothing`), the appended
+`host.docker.internal`, the EADDRINUSE UNMEASURED branch, the exec-127 guard
+(`proc.returncode != 0 and not results`), the reused-measurement source
+label, the re-measured `vfs` numbers with no `minutes per create` anywhere
+and `~13 GB per container` only in the comment that retires it, the
+conditional skeleton (`NOT NEEDED on this estate`, `NOT DERIVED YET in THIS
+file`), no `#your-pins's derive_my_pins.py` anchor, and a `reap_container`
+that reads *removed*. MCP 0.5.0 and the sandbox pin carry unchanged payloads
+and were not recut. What this demo does not take from 0.1.13: `read.py` is
+untouched, so F-87 and F-92 stay parked on the export format bump — this
+sitting is a floor bump and an image cut, not the one that opens `read.py`.
