@@ -11,7 +11,9 @@ multi-timestep case, one skill-card prompt and free prompts) and the page
 content is built so retrieval is meaningful and the cutoff observable:
 the 1998 easement deed exists ONLY on case_orchard's page 4 — an episode
 at timestep 2 must not see it (its checkout physically lacks the page and
-`search_case` is cutoff-filtered), an episode at timestep 4 must find it.
+`search_case` is cutoff-filtered), an episode at timestep 4 CAN find it —
+and row 3's prompt (`free:easement`, below) is shaped so the agent looks
+in the case file for it rather than in the decisions (library CP-103).
 
 Inside the corpus it writes a DECISIONS DROP (library CP-91): thirty
 fictional court decisions in the rii-dok v1 XML the library's decisions
@@ -165,10 +167,26 @@ prompts:
   - {id: "free:boundary-evidence", source: free, text: "What evidence about the true boundary line between the parcels is in the case file so far, and which way does each piece point? Cite pages as (page:N)."}
 """
 
+# `free:easement` is the bank's row 3 — the walkthrough's step 1b runs it at
+# t=4 beside row 2 at t=2 (library wishlist row 107). Its shape is the
+# instrument (library CP-103): it names the CASE FILE as the source ("in the
+# case file so far", the anchor row 2 uses) and asks for facts only page 4
+# carries — the deed's number and registration date — in the (page:N) form
+# the agent is taught. The shipped wording ("Does any recorded easement or
+# right of way affect the disputed strip? Name the registry number and cite
+# the page") was a question precedent could plausibly answer, and the 0.6B
+# floor model answered it from `mcp_gsj_search_decisions` alone in 4 of 5
+# samples at t=4 — a docket as the "registry number", a `page:7` no checkout
+# holds — and opened the case file in 1. Two other shapes were measured and
+# rejected: an "if the file does not contain one, say so" clause let the
+# floor model write that sentence WITHOUT calling any tool (3 of 5 samples
+# for one wording, 5 of 5 for the other, at t=4 where the deed exists). The
+# wording below opened the case file in 5 of 5 samples and named the deed,
+# its date and page 4 in every one.
 ORCHARD_PROMPTS_T4 = """\
 prompts:
   - {id: "skill:brief", source: skill, name: brief}
-  - {id: "free:easement", source: free, text: "Does any recorded easement or right of way affect the disputed strip? Name the registry number and cite the page."}
+  - {id: "free:easement", source: free, text: "Is there an easement deed in the case file so far? If so, which page records it, what is the deed number and when was it registered? Cite the page as (page:N)."}
   - {id: "free:precedent", source: free, text: "Page 4 records a right of way over the disputed strip. Search the decisions for precedent on whether such a registered right survives a change of ownership of the strip, and say what they hold, citing each decision you rely on."}
 """
 
@@ -490,8 +508,9 @@ def main() -> int:
 
     print(f"synthetic corpus written to {out}")
     print("  train/case_orchard: timesteps 2 and 4 — the 1998 easement deed "
-          "(registry no. 98-4417) exists only on page 4; an episode at "
-          "timestep 2 cannot see it, an episode at timestep 4 must find it")
+          "(registry no. 98-4417, 11 August 1998) exists only on page 4; an episode "
+          "at timestep 2 cannot see it, an episode at timestep 4 can find it — "
+          "row 3 (free:easement) asks for it as a case-file question")
     print("  eval/case_mill:     timestep 3, skill-card prompt + a precedent prompt")
     print("  AGENTS.md:          the reference text + the decisions-citation clause "
           "(dec:<doknr>:rn:<N>; G2 re-derives at `up`)")

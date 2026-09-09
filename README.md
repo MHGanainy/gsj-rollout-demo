@@ -335,7 +335,20 @@ sound) while plainly failing the task, and the system grades those two
 things separately, in the header. And the **tokens** line — `107
 trainable` is the loss-maskable span a trainer would actually consume
 (`./read.py export` hands over a derived JSON projection, arrays referenced
-by sha256). A stronger model produces stronger sessions — the same
+by sha256). The three counts have three scopes, and the archive's own
+`conventions` block is the source: `prompt` is the rendered prompt;
+`response` is the **whole session's merged chain** after it — every
+assistant turn *and* every tool result replayed as context, one
+`response_ids` array (`loss_mask` 0 on the replayed tokens); `trainable`
+is the sampled tokens alone, the `loss_mask` 1 positions. The 8,192-token
+generation cap (`max_tokens` in `config.yaml`, pi's `maxTokens`) bounds
+**one completion** — one assistant turn's generation — never the session,
+so a `response` of 19,000 tokens with `finish stop` is not a contradiction:
+no single turn hit the cap, and the count is the chain. (A round-six
+reader met exactly that header and asked for the scopes; measured on the
+CP-102 fresh-clone pair: a `response 2,522` episode whose two turns span
+`[0, 34)` and `[2480, 2522)` — 76 trainable, the 2,446 between them one
+tool result replayed.) A stronger model produces stronger sessions — the same
 stranger run's 6-turn `case_mill` episode read all three pages in order
 and wrote a coherent brief; what this weak one shows is that even the
 floor is rendered honestly. (The header's `run 9.9s` is the sandboxed
@@ -514,7 +527,14 @@ image pulls there is no record and no container yet, which is normal;
 before library CP-94 it printed `nothing running — ./bootstrap.py up` then,
 and a stranger nearly obeyed), **no estate** (nothing running, no record:
 `./bootstrap.py up`), and **standing** (the containers, the URLs, the
-submit recipe). The
+submit recipe). The lock is the kernel's `flock` on that file, not the
+file: when an `up` is killed, the kernel drops the lock with the process
+and the file with its dead pid stays behind — `status` then sees no
+holder and reports the estate, not ACTIVE, and `up` takes the lock again.
+So a lock file whose process is gone is detected as stale and ignored, and
+**never needs removing by hand** (a round-six reader was killed twice
+mid-`up`, recovered exactly this way, and found the sentence missing; the
+suite measures it on the real probe). The
 bring-up publishes Forgejo and the MCP on `127.0.0.1` host ports of its
 choosing (its recipe; the ports are in its `== run demo ==` block and in
 `work/runs/demo/run.json`); the Polar leg publishes **no host ports** — to
@@ -669,14 +689,76 @@ docker run --rm --network gsj-demo-net \
 ```
 
 Row 2 is `case_orchard@2`, row 3 is `case_orchard@4`, and the **1998 easement
-deed exists only on page 4**. So the t=4 episode can find, read and cite it and
-the t=2 episode cannot — `./read.py show` prints each hit's page and checks it
-against that episode's own timestep (`all <= timestep 2 (the cutoff holds)`),
-and `./read.py export`'s `page_census.pages_beyond_timestep` is `[]` on both.
-Same case, same corpus, same estate, one flag apart: the difference between the
-two transcripts is the retrieval bound doing its job. (The library's register
-carries this as its open row 107 — the pair had never been run by anyone
-outside the project through six stranger rounds, because nothing asked for it.)
+deed exists only on page 4** — deed no. **98-4417**, registered 11 August 1998,
+a number that appears nowhere else in the corpus (the suite checks the thirty
+rendered decisions for it). Row 3's prompt asks for exactly that, as a
+case-file question:
+
+> Is there an easement deed in the case file so far? If so, which page records
+> it, what is the deed number and when was it registered? Cite the page as
+> (page:N).
+
+**What the t=4 transcript should show**, in order: a `-> mcp_gsj_search_case`
+line under turn 1; a `page 4` hit in its result (`<- 4 hits, pages [4, 1, 2, 3]
+— all <= timestep 4 (the cutoff holds)` in every CP-103 sample); and an answer naming `98-4417`, the date and page 4.
+`./read.py export`'s `page_census.search_pages_returned` lists the pages the
+searches returned (`[1, 2, 3, 4]` here) and `pages_beyond_timestep` is `[]` —
+on both rows. Same case, same corpus, same estate, one flag apart: the
+difference between the two transcripts is the retrieval bound doing its job.
+On the 0.6B floor model library CP-103 measured this wording at **5 of 5**
+samples opening the case file at t=4, every answer naming 98-4417, the date
+and page 4 (as "page 4" in prose, never as the `(page:4)` token the prompt
+asks for — the floor model being itself).
+
+**When the t=4 episode goes elsewhere.** The prompt leads to the case file; it
+cannot force the agent there, and the floor model samples. If the transcript
+shows a `-> mcp_gsj_search_decisions` line and **no** `-> mcp_gsj_search_case`
+line, the agent answered from precedent: the episode is still **accepted**
+(acceptance checks provenance, not task success), its
+`page_census.search_pages_returned` reads `null` — the case file was never
+searched — and any page or registry number in the answer rests on nothing the
+session retrieved. `show`'s `citations` line and the `dec:` grounding cover
+the decisions half of such an answer; nothing yet grounds a `page:N` the way
+`dec:` tokens are grounded (`FINDINGS.md` F-120 prices that check), so read
+`search_pages_returned` and the tool lines as the check. Re-submit under
+another `--task-id` and read the pair you get. This is not hypothetical: row
+3's *shipped* wording ("Does any recorded easement or right of way affect the
+disputed strip? Name the registry number and cite the page") did exactly this
+on the floor model in library CP-102's run and in 4 of 5 samples at CP-103 —
+a decision's docket as the "registry number", a `page:7` no checkout holds —
+which is why the wording changed.
+
+**The same question at t=2.** Row 3's text lives at t=4 in the bank; to ask it
+where the page does not exist, pass the triple instead of the row (the header
+then reads `split None` — a triple submit records no split):
+
+```bash
+docker run --rm --network gsj-demo-net \
+  -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
+  -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.14 \
+  gsj-rollout submit --config /estate/rollout.yaml \
+    --case case_orchard --timestep 2 --task-id easement-t2 \
+    --prompt 'Is there an easement deed in the case file so far? If so, which page records it, what is the deed number and when was it registered? Cite the page as (page:N).'
+```
+
+The honest t=2 answer is that the file does not (yet) contain one. What the
+floor model actually does, measured 5 of 5 at CP-103: it searches the case
+file (`<- 2 hits, pages [1, 2] — all <= timestep 2 (the cutoff holds)`, no
+page 4), cannot name the deed number and says so ("not provided") — and then
+writes that "the easement deed is recorded on page 1", which page 1 does not
+say; two of five invented a 2019 registration, the survey's year. Read the
+search result and the absent number as the evidence — that is the retrieval
+bound holding — and the sentence about page 1 as the 0.6B model confabulating
+over it. Two wordings that offered an escape ("if the file does not contain
+one, say so") were measured and dropped: at t=4, where the deed exists, the
+floor model wrote that sentence **without calling any tool** in 3 of 5 and 5
+of 5 samples — an honest-empty clause is a lazy exit for a small model, so
+the prompt has none, and the t=2 negative has to come from a search that finds
+nothing. (The library's register carries the pair as its open row 107 — never
+run by anyone outside the project through six stranger rounds, because
+nothing asked for it; library CP-102 ran it as its author and found the
+shipped wording going to precedent, which is not the event the row waits on.)
 
 Polar starts a sandboxed episode container, the agent works the task
 against your endpoint and the estate's retrieval, and the finished trace is
@@ -770,15 +852,18 @@ episode's, not the model class's.
 
 The estate's agent has **eleven tools on its roster**, and G3 pins that
 roster as a whole (the eleven-tool wire array, hashed; the set is the
-library's, not per-estate — a corpus does not change it). Eight are pi's
-built-ins (`read`, `ls`, `grep`, `find`, `write`, `edit`, `bash` and its
-kin) and three are this estate's MCP tools: `mcp_gsj_search_case`
-searches *this* case's pages and is scoped by the episode's cutoff;
-`mcp_gsj_search_decisions` searches **court decisions** — precedent, the
-same for every case, not cutoff-scoped; `mcp_gsj_case_status` reports the
-episode's scope (`case_id`, `timestep`, `pages_visible`) and is often the
-first call a capable model makes (a fourth, `mcp_gsj_decision_stats`,
-reports the drop's census). The worked example brings thirty decisions:
+library's, not per-estate — a corpus does not change it). Counted from the
+hashed array itself (`trajectory.traces[0].tools` in any archived episode —
+this sentence used to say eight and three and then name a fourth, and a
+round-six reader could not make it add up): **seven** are pi's built-ins —
+`read`, `ls`, `grep`, `find`, `write`, `edit`, `bash` — and **four** are
+this estate's MCP tools, all four inside the eleven G3 hashes:
+`mcp_gsj_search_case` searches *this* case's pages and is scoped by the
+episode's cutoff; `mcp_gsj_search_decisions` searches **court decisions** —
+precedent, the same for every case, not cutoff-scoped; `mcp_gsj_case_status`
+reports the episode's scope (`case_id`, `timestep`, `pages_visible`) and is
+often the first call a capable model makes; `mcp_gsj_decision_stats`
+reports the drop's census. The worked example brings thirty decisions:
 
 ```
 ./synthetic/make_corpus.py        # writes corpus-synthetic/, including decisions/
@@ -1078,9 +1163,12 @@ That shape, with your documents in the pages, is all `bootstrap.py up`
 needs. `validate` names every rule your tree breaks before anything runs.
 
 The synthetic corpus is also the demo's proof: the 1998 easement deed
-exists only on `case_orchard`'s page 4, so an episode at timestep 2
-*cannot* cite it and an episode at timestep 4 *must* — the temporal cutoff,
-observable in one fact (and in every `show` transcript's page lines).
+(no. 98-4417) exists only on `case_orchard`'s page 4 — and, checked by the
+suite, in no rendered decision — so an episode at timestep 2 *cannot* cite
+it and an episode at timestep 4 *can* — the temporal cutoff, observable in
+one fact (and in every `show` transcript's page lines). *Can*, not *must*:
+whether the t=4 agent opens the case file is the agent's choice, which is
+why row 3's prompt is shaped to lead there (step 1b says what to check).
 
 
 ## Reader evidence contract (CP-86)
