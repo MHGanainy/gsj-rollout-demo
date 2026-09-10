@@ -351,3 +351,35 @@ that this record does not imply it: `pi_harness.py`'s `| tee` still makes a
 pipeline's exit the step's (library row 110 — routed around on the library's
 pages with `-e TMPDIR`, which this demo's compose has always set, so door A
 never meets it), and `cli.py`'s serve NOTE still names only a `<checkout>`.
+
+CP-105 (2026-09-10): the 0.1.15 wheel was published on PyPI at 2026-09-10T18:37:45.254945Z; demo edits began at 2026-09-10T18:45:29Z (the stamp
+the patch script checked, not memory). The host floor, remedies, `polar.Dockerfile` default and all four
+`docker run` recipes now select 0.1.15. A-28 requires this recut because the image carries CP-104's changed
+estate module — round seven's `up`: the rows `--row N` addresses listed under the taskbank line of the
+`== run <name> ==` block (the block `bootstrap.py` echoes), the pull heartbeat's tally age, a cut transfer told
+to re-run, and in the tool's own output this script mutes, the pullable image named and every printed command
+carrying `--runs-dir`, `--corpus` and the interpreter. `gsj_rollout/` itself is byte-identical to 0.1.14's but
+for the version literal. The build recipe used public `LIB_REF=v0.1.15` and PyPI `LIB_VERSION=0.1.15`.
+
+**The order was the library's ADR-0043** — the image before the front door: the library's release commit stayed
+off its `main` until this image answered an anonymous reader, so the README, the guide pages and the page `up`'s
+NOTE links to never named a tag that did not resolve; the window left is the one bound to the wheel itself,
+PyPI publication (2026-09-10T18:37:45.254945Z) to the first anonymous 200 on the tag (2026-09-10T18:53:08+00:00).
+
+Published index `sha256:24cbe2eaf52b8f43b5617398a46bdb346dd2076c7e25c7fe76af25cc34d4c47d`:
+
+- linux/amd64 `sha256:cb8786d4b6547f4ff50b4d13449a0f0d02d0fb74aeefae18126a4e2d19513bdf`
+- linux/arm64 `sha256:786092901cecf3f7ef87d8f4c91219d7846797d64d8c6327f0d3b9f7befe3a2c`
+
+Both child manifests were read anonymously and both images were pulled using an empty Docker authentication
+configuration. Both platform containers report 0.1.15 and release source `d3f7120bd3bf40e7ba94d7bdcf00378a38ac07fd`; their
+packaged estate (`e6598eeb…`) and pipeline
+(`a291ec56…`) hashes equal the independently installed public PyPI
+wheel's, byte for byte, and CP-104's seams are inside (`polar_image_ref()` names this tag, `bank_rows_lines`,
+the `transfer` kind). MCP 0.5.0 and the sandbox pin carry unchanged payloads and were not recut.
+The fresh clone's episodes on this image — step 1b's fence (row 3, t=4) and the t=2 triple, by the README's own
+install line — are recorded in the library's printed CP-105 report: the clone is of this commit, run before the
+push, so its session ids cannot be written into it. What this demo does not take from 0.1.15: `bootstrap.py`'s failed-derivation path
+(F-122, F-123) and its own heartbeat (F-128) wait on the next `bootstrap.py` lift, and F-87, F-92 and F-120 on
+the `read.py` export bump; and what the LIBRARY does not carry at 0.1.15: row 110's `| tee` status, row 108's
+`cli.py` NOTE, and row 112's residue.

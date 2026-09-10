@@ -61,25 +61,25 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.14' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.15' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.14"   # library 0.1.14 inside (CP-102 cut): CP-101's `== run <name> ==` footer made conditional on the same fact as the pins line above it (a round-six reader found the two contradicting each other twenty lines apart), on top of 0.1.13's reaper bound, gateway probe (a per-run nonce, both legs dialled, host.docker.internal appended, a port it cannot bind UNMEASURED), exec-127 branch, corrected measured-on-an-inference sites, re-measured vfs warning and conditional pins skeleton
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.15"   # library 0.1.15 inside (CP-105 cut): CP-104's round-seven `up` — the rows `--row N` addresses listed in its `== run <name> ==` block and in `status`, the pullable Polar image named from a wheel, printed commands carrying --runs-dir, --corpus and the interpreter, a cut pull transfer told to re-run, a run that stopped before its record named as such, a /tokenize request with no answer retried once — on top of 0.1.14's conditional footer and everything under it
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.5.0"       # multi-arch; 0.5.0 = the decisions surface (library CP-79) —
                                                              # 0.4.x refuses the `decisions.path` key a drop needs (library wishlist 77)
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 14)         # CP-102: published CP-101's footer conditional — `up`'s
-                             # `== run <name> ==` block says `G1/G2 EMPTY in it — NOT NEEDED
-                             # on this estate` where the pins in force cover the corpus,
-                             # instead of contradicting the pins line twenty lines above it
-                             # (a round-six reader filed the pair); everything 0.1.13 carried
-                             # (CP-98's reaper bound, CP-99's gateway probe and its corrected
-                             # labels, the exec-127 branch, the measured vfs warning, the
-                             # conditional pins skeleton) rides unchanged. The pinned image
-                             # carries the same wheel
+LIB_MIN = (0, 1, 15)         # CP-105: published CP-104's round-seven `up` — the rows
+                             # `--row N` addresses under the taskbank line of its
+                             # `== run <name> ==` block (the block this script echoes), the
+                             # pull heartbeat's tally age, a cut pull transfer told to re-run,
+                             # and in the tool's own output this script does not echo, the
+                             # pullable Polar image and printed commands carrying --runs-dir,
+                             # --corpus and the interpreter; 0.1.14's conditional footer and
+                             # everything under it ride unchanged. The pinned image carries
+                             # the same wheel
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -386,20 +386,17 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.14' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.15' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.14 "
-            "ships an `up` whose `== run <name> ==` footer agrees with its pins line (on an "
-            "estate whose pins already cover the corpus it says NOT NEEDED instead of "
-            "claiming G1/G2 are empty until a quarantine supplies them — a round-six reader "
-            "found the two contradicting each other on one screen), on top of 0.1.13's "
-            "gateway-host probe with a label that means what it says, the exec-127 branch, "
-            "the measured vfs warning, the conditional pins skeleton and the reaper's bound "
-            "(library CP-101, published at CP-102).",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.14' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.15 "
+            "ships round seven's `up`: the rows `--row N` addresses listed under the "
+            "taskbank line of its `== run <name> ==` block, the pull heartbeat's tally age "
+            "and a cut transfer told to re-run, on top of 0.1.14's footer that agrees with "
+            "its pins line and everything under it (library CP-104, published at CP-105).",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.15' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -408,7 +405,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.14' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.15' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -802,12 +799,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.14' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.15' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.14' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.15' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -815,7 +812,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.14') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.15') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "

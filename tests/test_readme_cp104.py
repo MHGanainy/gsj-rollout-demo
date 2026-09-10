@@ -163,7 +163,7 @@ def test_a_new_shell_is_reminded_of_the_venv_in_the_quickstart():
     clone = next(i for i, l in enumerate(lines) if l.startswith("git clone "))
     assert lines[clone + 1].startswith("# a new shell later? `. ../.venv/bin/activate` here first")
     # the install line the proofs extract is unchanged
-    assert "pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.14' pyarrow" in lines
+    assert "pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.15' pyarrow" in lines
 
 
 # --------------------------------------------- F-126: four answers, each true of the code
