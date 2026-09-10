@@ -49,6 +49,7 @@ mkdir -p gsj-demo && cd gsj-demo                 # the venv lands here, the clon
 python3 -m venv .venv && . .venv/bin/activate    # PEP 668 systems refuse a bare pip install
 pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.14' pyarrow
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
+# a new shell later? `. ../.venv/bin/activate` here first — the scripts need the venv's PyYAML
 
 ./synthetic/make_corpus.py                       # the worked corpus + thirty decisions
 cp config.yaml.example config.yaml               # fill in three values (corpus, base_url, model)
@@ -58,8 +59,9 @@ cp config.yaml.example config.yaml               # fill in three values (corpus,
 Then submit one episode and read it — the walkthrough's
 [step 1](#walkthrough-an-episode-submitted-and-read) prints the command with your
 own paths in it. Budget for the **image pulls**, which dominate a cold first run
-on a slow pipe: four images, ~4.05 GB compressed on the wire and ~6 GB on disk
-after extraction, of which the retrieval service alone is 2.65 GB.
+on a slow pipe: four images, **~1.8 GB compressed on the wire**, of which the
+retrieval service alone is ~1.35 GB, and ~4–6 GB on disk after extraction (the
+disk figure depends on the daemon's image store — the bullet below).
 
 ## What to expect, measured
 
@@ -99,15 +101,26 @@ repo learned that as
   below; the install needed one. You bring Docker with the `docker compose`
   plugin (Compose V2 or later), Python >= 3.12 and git — the exact
   prerequisite line is in "Run it" below.
-- **Disk, and the wire — two different numbers.** **~6 GB** of images **on an
-  overlay storage driver, after extraction** (measured at library CP-61 on
-  Apple Silicon: the daemon grew 5.4 GB for the four images, whose sizes sum to
-  6.1 GB); **~4.05 GB compressed on the wire**, which is the one that governs
-  the clock, and within it the retrieval service is **2.65 GB — 44% of the
-  total in one image** (measured round six). One figure governs `df`, the other
-  governs how long you wait, and a round-six stranger extrapolated "on the order
-  of a day" from the disk figure before correcting itself: it read ~6 GB as a
-  download total, which it is not. `work/` after one episode: 10–14 MB. **On a copy-on-create driver
+- **Disk, and the wire — two different numbers.** **~1.8 GB compressed on
+  the wire** — the one that governs the clock — measured from the four images'
+  registry manifests at library CP-104 (1.79 GB for `arm64`, 1.84 GB for
+  `amd64`), and the retrieval service is **1.34–1.38 GB of it, about three
+  quarters in one image**. On disk, after extraction, the same images are
+  **~4.05 GB** as a Linux daemon's classic `overlay2` store accounts them
+  (`docker system df` read 4.061 GB for two round-seven strangers, the
+  retrieval service 2.65 GB of it) and **~6 GB** in Docker Desktop's containerd
+  image store (`docker info` names its driver `overlayfs`; library CP-61
+  measured the daemon growing 5.4 GB for four images listed at 6.1 GB, and
+  this workstation lists them at 6.8 GB at CP-104). This bullet called 4.05 GB
+  "compressed on the wire" and 2.65 GB "44% of the total" through library
+  CP-103 — a disk figure under the wire's label, and a share of neither total
+  (2.65 of 4.05 is 65%; 44% is 2.65 of Desktop's 6.1); two round-seven readers
+  caught it, one from the manifests and one by dividing. `docker system df` is
+  the accounting check once the pulls are done — it counts an image only when
+  it is complete, which is why it is no progress meter (the pull bullets
+  below). A round-six stranger extrapolated "on the order of a day" from the
+  disk figure before correcting itself; plan a link by the wire figure.
+  `work/` after one episode: 10–14 MB. **On a copy-on-create driver
   (`vfs`) the figure is a different order of magnitude**: every container is
   a full copy of its image, not a layer over it. Round five measured it
   against an `overlay2` control — same door, same corpus, same row, the
@@ -181,7 +194,8 @@ repo learned that as
 - **Normal, not broken.** An empty quarantine is normal — the reference
   stack measured 72/72 accepted at library CP-32, this demo's smoke 1/1.
   A small model hitting the 8,192-token generation cap is labelled, not
-  silent: `submit` prints the `length-terminated:` line and `show` marks
+  silent: `submit` counts it on the `length-terminated: N/M` line it prints
+  after every run (`0/1` is a clean run — the N is the signal) and `show` marks
   the truncation twice — such an episode *qualified*, and whether to
   train on it is the trainer's call. Degenerate episodes are the 0.6B
   floor model being itself, honestly rendered: an early smoke episode
@@ -230,7 +244,11 @@ repo learned that as
   docker error above it, which is authoritative): (1) a pull that prints
   `Retrying in N seconds` per layer and ends `unexpected EOF` is a
   **transport failure** — re-run `./bootstrap.py up` (idempotent: the
-  daemon resumes from the layers it kept; a stranger's cold pull of the
+  daemon resumes from the layers it kept — on the re-run it re-announces every
+  layer as `Pulling fs layer` and the kept ones report `Download complete`
+  within seconds, a resume that reads like a restart: round seven's a2
+  finished the retrieval image in 16 min on the re-run after 24 on a killed
+  attempt; a stranger's cold pull of the
   retrieval image retried two layers for 48 min on a slow pipe before
   failing this way — 52 min of `up` in all);
   (2) a pull that downloads every layer and then fails `failed to
@@ -256,8 +274,10 @@ repo learned that as
   (elapsed time, and whether this host received bytes in the last minute),
   and `./bootstrap.py status` says `ACTIVE` while an `up` runs. **Since
   library CP-96 the heartbeat also names the layer phase** — `N/M layers
-  complete, K extracting, J downloading` — and says when **no bytes are
-  expected**: after every layer prints `Download complete` the daemon
+  complete`, then whichever of `K extracting`, `K downloaded, waiting to
+  extract` and `J downloading` apply, in that order (a round-seven reader met
+  the third and checked it against this sentence) — and says when **no bytes
+  are expected**: after every layer prints `Download complete` the daemon
   extracts, which moves the disk and not the pipe; round four's heartbeat
   said "26.0 KiB in the last 60s — the pipe is moving" through forty
   minutes of that, and a stranger counted `Download complete` against
@@ -422,7 +442,12 @@ collection being built on the poll line, `verify`'s skips counted apart from its
 passes, the pull heartbeat naming the layer phase, and
 `work/runs/demo/pins.skeleton.json` — beside the run's OWN `rollout.yaml`, which is
 not the `work/estate/rollout.yaml` this walkthrough hands you (the estate writes
-three; a round-five stranger looked in the wrong one first) — with the G6 tail and
+three: the bring-up's own `work/runs/demo/rollout.yaml`, for a host-run Polar;
+`work/estate/rollout.yaml`, re-addressed for the three containers — what episodes
+run with, and what `preflight.py` reads; and `work/estate/receiver/rollout.yaml`,
+the receiver's own copy of that one, so its `serve` re-renders a topology beside
+its own config and never aliases Polar's — a round-five stranger looked in the
+wrong one first, a round-seven one found the third with `find`) — with the G6 tail and
 end-of-turn id measured from the engine, and saying in the file whether the walk it
 starts is needed on this estate at all: here it is not, because `bootstrap.py` has
 already derived real G1/G2 into `work/estate/pins.gsj.json` (library CP-96 +
@@ -587,6 +612,30 @@ appended to `config.yaml` after `up` left preflight all-ok).
 ./preflight.py
 ```
 
+**Run it again after `up` and before your first submit — `up` can exit 0 on
+pins it expects to be quarantined.** On a non-reference model `up` derives the
+G6 tail and the end-of-turn id from your endpoint with one `/tokenize` request
+per probe, each under a 15 s timeout and no retry, so on a shared endpoint one
+request can simply miss. `up` then keeps the reference estate's values, says so
+in its log (`the first episode will likely be quarantined at G6`) and still
+exits 0; the post-`up` preflight is the gate that exits 1 on it, with `[FAIL]`
+on the `tokenizer tail` and `end-of-turn id` rows. The cure is the one the log
+names — re-run `./bootstrap.py up` with the endpoint live (23 s warm, round
+seven) — and three things that failure path prints are not to be believed as
+written: the log's `this endpoint cannot render its own chat template over the
+API (not vLLM?)` is an inference from one lost request, not a measurement
+(round seven's endpoint was vLLM and answered the same request in 0.25 s either
+side of it); `work/estate/pins.gsj.json`'s `coverage.g6_expected_tail_ids`
+still reads `derived here from the endpoint's own template render` — its
+`derived_at` line says FAILED, so read that one; and the library tool's
+`WARNING: --end-of-turn-token-id 151645 disagrees with the endpoint's own
+render` is `bootstrap.py` having passed the reference id down as though you
+had chosen it, so the library's own successful measurement is overruled and
+the cure it names uses flags this script does not expose — the re-run is the
+cure. Round seven's a2 met all four in one run and caught them only because it
+ran this preflight after `up`; `FINDINGS.md` F-122 and F-123 carry the
+`bootstrap.py` half.
+
 The demo's smoke ran against the reference stack (vLLM serving
 `Qwen/Qwen3-0.6B` with pinned sampling). Your endpoint differs in ways that
 break *different* things — no tool-call parser, another tokenizer, unpinned
@@ -653,6 +702,11 @@ docker run --rm --network gsj-demo-net \
     --from-bank /corpus/taskbank.parquet --row 2
 ```
 
+Run it from the clone root: the fence reads `$PWD`. `work/estate/submit.sh`
+holds the same command with absolute paths written in and passes extra
+arguments through, so it runs from anywhere — it ends `--row 0`, and
+`work/estate/submit.sh --row 2` gives this row (the last `--row` wins).
+
 (The token variable's name follows your corpus's `owner:` —
 `GSJ_FORGEJO_READ_TOKEN_<OWNER>`; the `up` printout and `./bootstrap.py
 status` print the recipe with yours, and `estate.clone_credential_env` in
@@ -708,7 +762,12 @@ difference between the two transcripts is the retrieval bound doing its job.
 On the 0.6B floor model library CP-103 measured this wording at **5 of 5**
 samples opening the case file at t=4, every answer naming 98-4417, the date
 and page 4 (as "page 4" in prose, never as the `(page:4)` token the prompt
-asks for — the floor model being itself).
+asks for — the floor model being itself). **Run by strangers, round seven**:
+both demo-door readers ran this fence verbatim against a borrowed
+`qwen3.6-27b`, and both t=4 episodes called `mcp_gsj_search_case` first
+(`easement deed`, then `Grunddienstbarkeit` or `easement`), got page 4 as the
+top hit, made no decisions call and answered `(page:4)`, `98-4417`, `11 August
+1998` — the token form included.
 
 **When the t=4 episode goes elsewhere.** The prompt leads to the case file; it
 cannot force the agent there, and the floor model samples. If the transcript
@@ -750,15 +809,53 @@ writes that "the easement deed is recorded on page 1", which page 1 does not
 say; two of five invented a 2019 registration, the survey's year. Read the
 search result and the absent number as the evidence — that is the retrieval
 bound holding — and the sentence about page 1 as the 0.6B model confabulating
-over it. Two wordings that offered an escape ("if the file does not contain
+over it. A larger model does what the prompt allows: round seven's a1 ran this
+triple on the 27B unprompted — five case-file searches in English and German,
+every one returning pages 1 and 2 only, then `mcp_gsj_case_status`
+(`pages_visible 2`) — and answered *"No, there is no easement deed recorded in
+the case file so far."*, with no page 4, no 98-4417 and no invented date. Two
+wordings that offered an escape ("if the file does not contain
 one, say so") were measured and dropped: at t=4, where the deed exists, the
 floor model wrote that sentence **without calling any tool** in 3 of 5 and 5
 of 5 samples — an honest-empty clause is a lazy exit for a small model, so
 the prompt has none, and the t=2 negative has to come from a search that finds
-nothing. (The library's register carries the pair as its open row 107 — never
-run by anyone outside the project through six stranger rounds, because
-nothing asked for it; library CP-102 ran it as its author and found the
-shipped wording going to precedent, which is not the event the row waits on.)
+nothing. (The library's register carried the pair as its row 107 — never run
+by anyone outside the project through six stranger rounds, because nothing
+asked for it; library CP-102 ran it as its author and found the shipped wording
+going to precedent. Round seven's two demo-door readers ran it, one of them
+both halves, and the row closed at library CP-104 — as a claim about what this
+walkthrough can *show* a reader. It was never a question about whether the
+retrieval service filters; the next paragraph says where that happens.)
+
+**Where each half is enforced** — round seven's a1 asked for this beside step
+1b, having seen the retrieval service's census carry all four orchard pages
+while its t=2 searches returned `[1, 2]` and its t=4 ones `[1, 2, 3, 4]`. Both
+halves take `T` from the task, never from the agent. **The checkout**: the
+harness clones the case from Forgejo at `timestep-T` alone — `--depth 1
+--single-branch`, the remote and the reflog then removed — so the sandbox's
+`md/` holds pages `1..T`, and the estate requires sign-in for read, so the agent
+cannot re-clone past it (that is what the git host is for: one repository per
+case, one branch per timestep, cloned fresh into every sandbox). **The
+retrieval**: the service indexes each case's *whole* document once — the census
+a1 saw — and applies the cutoff per query. The harness mints every episode a
+token signed with the estate's secret and carrying `case_id` and `timestep`; the
+service checks the signature and takes `T` from the token alone;
+`mcp_gsj_search_case` filters its candidates to `page <= T` *before* ranking (a
+pre-filter, not a trim of the ranked list — the library's
+`test_cutoff_prefilters_candidates_not_postfilters` pins it), and
+`mcp_gsj_case_status` counts the same visible pages; `mcp_gsj_search_decisions`
+is never clamped. So the pair separates the halves because a case-file search
+never reads the checkout: at t=2 the index still held page 4, and the only thing
+keeping it out of the results was the token's `T`. Different queries change
+nothing — library CP-104 sent one query, `easement deed`, to this estate's live
+service under a t=2 and a t=4 token: page 4 came back only under t=4, and a t=2
+token re-encoded to `T=4` under its original signature was refused. **After the
+episode**, `show`'s `all <= timestep T` and `export`'s `pages_beyond_timestep`
+are `read.py`'s own computation over the archived trace, and the receiver's G5
+is the library's (`checks.py`) over the same trace — two implementations of one
+property on one record; neither is the filter, which acted before the trace
+existed. G5 also reads the checkout's recorded posture (`gsj_workspace`:
+shallow, zero remotes, pages `1..T`).
 
 Polar starts a sandboxed episode container, the agent works the task
 against your endpoint and the estate's retrieval, and the finished trace is
@@ -980,10 +1077,14 @@ you would notice there: the whole from-nothing run below, decisions
 included, was **80 s**. On a contended CPU host the same 317 pieces are
 minutes, not seconds — round four (a laptop running four nested-Docker
 containers at once) measured them inside a 90 s window on one host and
-could not measure them on another whose host slept mid-embed — and while
-they embed the bring-up's poll line names the collection being built
-(`building decisions: batch 1/1`, library CP-96); before that it read
-`2/2 embedded` and looked finished. The library's `--ingest-timeout`
+could not measure them on another whose host slept mid-embed — and while they embed, the bring-up's poll line says the service is still
+working: on this corpus almost always as `the service is still working (the
+next collection has not reported a batch yet)`, the line both round-seven demo
+readers saw. The named form, `building decisions: batch 1/1` (library CP-96),
+prints only once a collection's first add batch has landed, and the thirty
+decisions' 317 pieces are a single batch of up to 1,000, so that collection is
+finished by the next poll. Before library CP-96 the line read `2/2 embedded`
+and looked finished. The library's `--ingest-timeout`
 (default 1800 s, on the process's clock) is the budget, and
 `./bootstrap.py up --ingest-timeout <seconds>` forwards it. For comparison, the real corpus the surface was
 written against is 33,979 decisions and about 1.16 million pieces — hours,
@@ -1020,10 +1121,12 @@ exactly which gate failed and kept the full body as evidence.
 
 The classic first quarantine is `G6:prompt_suffix_ne_tail_ids` — a
 thinking-mode mismatch between the submit leg and the estate's pins, or a
-non-Qwen model whose pins never got derived because the endpoint was down
-at `up` time (the bootstrap derives them from the endpoint's own template
-render; re-run `./bootstrap.py up` with the endpoint live, and the
-preflight's `tokenizer tail` row verifies before an episode is spent).
+non-Qwen model whose pins never got derived at `up` time — the endpoint was
+down, or it was up and its one derivation request timed out, which a shared
+endpoint makes routine (step 0 says what that path prints). The bootstrap
+derives them from the endpoint's own template render: re-run `./bootstrap.py
+up` with the endpoint live, and the preflight's `tokenizer tail` row verifies
+before an episode is spent.
 
 ## Bring your own model
 
@@ -1038,7 +1141,16 @@ the served name from `/v1/models`, the end-of-turn id and the
 generation-prompt delta from `/tokenize` with the kwargs pi actually
 sends, and what an endpoint cannot give you (G4's byte hashes, the
 weights revision, the sampling policy), stated as absent; MODEL-SURFACE
-below stays the item-by-item surface. The preflight then verifies
+below stays the item-by-item surface. Two facts about that derivation a
+round-seven reader could not find here: it sends one `/tokenize` request per
+probe with a 15 s timeout and no retry (on a shared endpoint, re-run `up` if one
+misses — step 0), and it renders under the kwargs pi actually sends,
+`{"enable_thinking": <level != off>, "preserve_thinking": true}` on every
+request whatever the level. `preserve_thinking` is a template switch pi sends
+unconditionally; the derivation renders under it because G6 compares what pi's
+requests render, and whether a template reads either key is the template's own
+business (one that reads neither renders the same tail both ways — Llama-3.x,
+library CP-38; the library's bring-your-own.md, "The kwargs pi sends"). The preflight then verifies
 the derived values and measures the one property nothing checks *before*
 episodes are spent: whether your chat template re-renders history exactly
 (if it does not, every multi-turn episode reconstructs as disconnected
@@ -1076,8 +1188,10 @@ slots stand like this (a stranger tabulated them on 2026-09-07; the file's
 Two things follow. A carried set that *matches* is still a measurement —
 G3 and G7 prove the harness is the reference harness on every trace. An
 empty set is not a gate that passed; it is a gate nothing checks: on the
-reference model the estate-side G4 walk verified the tokenizer and
-template bytes once, at pin time; on your endpoint nobody has, and `up`
+reference model the estate-side G4 walk (the library's `pins/derive_pins.py`,
+run where the served snapshot's files are on disk: it hashes `tokenizer.json`
+and the template file the engine serves) verified the tokenizer and template
+bytes once, at pin time; on your endpoint nobody has, and `up`
 says so (`pins — … EMPTY — nothing checks them — G4`). On the reference
 model the same table reads carried-and-checked for G3/G7/G6 and
 carried-not-checked-by-any-trace-gate for G4.
@@ -1114,6 +1228,15 @@ training-distribution work**, where the temperature that produced 2,233
 logprob'd tokens is the single largest unknown in the artifact (a
 stranger's words). The library's register carries this as its open row 22
 (per-episode engine binding); when you *can* pin, do, and record the argv.
+Unknown is not the same as unusable: on both engines this project has
+measured (library CP-09 and CP-09′) the captured logprobs matched a
+teacher-forced replay of the model within numerical noise, so each number is
+the model's own score of the token it emitted; what the unknown policy hides is
+the distribution those tokens were *drawn* from — which a trainer needs for any
+correction against the behaviour policy, and cannot recover from these traces.
+On a borrowed engine whose version you do not know, the first half is
+unmeasured too. Whether that disqualifies the traces is the trainer's call
+(round seven's a2 asked).
 
 ## Bring your own corpus
 
@@ -1178,7 +1301,10 @@ results keep their tool identity. Missing results, unmatched results (including
 those without IDs), and duplicate/ambiguous IDs are named and retained; none
 is silently paired by position. Citation availability respects the turn in
 which a result arrived. This checks identifier grounding, not whether a legal
-claim is supported, and assigns no reward.
+claim is supported, and assigns no reward — `export`'s `reward` is the
+trace's own field passed through, and `null` because nothing in this estate
+scores (a rollout server that scores is outside the library's scope; filling it
+is the trainer's).
 
 A `write` call records an **attempt**, including its full attempted content.
 Only the tool's recognized success acknowledgement establishes `succeeded` at
