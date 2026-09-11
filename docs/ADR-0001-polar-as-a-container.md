@@ -427,3 +427,74 @@ results belong in the library's CP-106 completion record. MCP 0.5.0, the pi0.83.
 sandbox, Polar patches, demo bootstrap behavior and reader behavior are unchanged.
 The findings awaiting a bootstrap lift or reader export change remain recorded in
 their existing entries; this release adds no defect correction or architectural decision.
+
+Release 0.1.17 (2026-09-11 UTC): the host floor, remedies, Dockerfile default
+and four `docker run` recipes advance to 0.1.17. The library release source is
+`0bc15de7f034d6f031b4135d1fe0245ec31ddb52`, public tag `v0.1.17` (annotated
+tag object `e87afdc29daffe8cb41b26495cb324b512482a4a`). This release groups
+created-retrieval activation without changing its checkpoints, shares the
+generated-JSON lock readers, and delegates retrieval response emission to
+Starlette while retaining its encoded bytes and HTTP response contract.
+It does not change this ADR's decision, Polar patches, models, pins,
+persisted formats, bootstrap workflow or reader behavior.
+
+PyPI published `gsj_harness_rollout_server-0.1.17-py3-none-any.whl` at
+`2026-09-11T21:06:21.594501Z`, SHA-256
+`93d4cd92bf303bd09b7a1e16ab5f3479c9b02d75ab0c14e53fba3d37f8b7f87d`.
+The existing `estate/polar.Dockerfile` and `estate/` context built both
+platforms locally with public `LIB_REF=v0.1.17` and PyPI
+`LIB_VERSION=0.1.17`. Its only repository change is that version default;
+no local wheel handoff or dependency-freezing recipe was used. Both local
+children passed before the same tested index was pushed, without rebuilding.
+
+Published Polar image `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17`,
+index `sha256:6a385c03445a97f7dd046d177af1b3944c84cd1e613b911a1988bfd8560e9c29`:
+
+- linux/amd64 `sha256:408fba68f58330945881b5b5dec6de91501aa23bac9ee80970166702cfc20101`
+- linux/arm64 `sha256:9ca9b51fd3b4a8de9a1c967d463ee6074381edcceeaa1d87447a89eb4913ff47`
+
+Both child manifests and configurations were read anonymously, both images
+were pulled with an empty Docker authentication configuration, and both
+runtime probes reported the exact release source and 0.1.17. All ten
+packaged Python modules and three pins/resource files match the independently
+installed public wheel. The 21-package Python closure differs from the
+actual published 0.1.16 image only in the root version; all 118 dpkg package
+records, Python and Docker CLI binaries, Polar marker and runtime image
+configuration match. PiHarness and the validating builder still subclass
+Polar's bases; retained phase/result checks and the new activation/reader
+seams pass. ARM executes natively in the ARM Docker Linux VM; amd64 runs
+under emulation. These are not two native hosts or a native H200 proof.
+
+The image push completed at `2026-09-11T21:18:13.355522+00:00`.
+The first retained anonymous index 200 in this proof was observed at
+`2026-09-11T21:18:40.727314+00:00`, 739.133 seconds after PyPI publication;
+both runtime proofs finished at `2026-09-11T21:18:58.552135+00:00`,
+756.958 seconds after publication. These are observed bounds, not the
+first instant of global availability. The public and locally tested
+indexes and configurations match byte for byte. Proof-owned containers
+were removed and the prior container, volume and network inventory restored.
+
+The retrieval change is delivered separately: `bootstrap.py` now selects
+`ghcr.io/mhganainy/gsj-mcp-service:0.5.1`, published index
+`sha256:5602a693fe86cc52ef2df3ca590e1b56c149d7f5c2d6998f20b54bc8f1b697ca`:
+
+- linux/amd64 `sha256:5c7dd78afa7b7f5728998783a5b4a1f34347bdd7dcc1613af5df79d9e023c61a`
+- linux/arm64 `sha256:c4cc0da50ae21865b402b7f98129544aeba5eb0b75d9e7a5fc23ab092aedc93a`
+
+Anonymous published-image probes verified the actual
+`/app/gsj_mcp_service/app.py` SHA-256
+`b4123cdbb0ac457784eb8aae7909ce6b3697006a8e95eed80cecdc03aed039eb`,
+its Starlette `Response` binding and installed `starlette==1.6.0` on both
+platforms. All 154 raw response observations match the tested candidate;
+the runtime closure and configuration match its preserved 0.5.0 basis,
+apart from release labels. Existing recorded-image recovery and adopted
+deployments keep their recorded selection; this consumer update selects
+the new image for fresh bring-up.
+
+This entry records artifact delivery under the library's ADR-0043/A-28
+ordering. Fresh-clone step 1b/t=4 and t=2 episodes, independent archive
+readback and failure/cure routes remain separate consumer gates before
+pushing this exact demo commit; their results belong in the library's
+release completion record. The earlier t=2 hallucination remains disclosed:
+cutoff/provenance validation does not establish answer truthfulness.
+The `pi0.83.0-3` sandbox and parked bootstrap/reader findings remain unchanged.

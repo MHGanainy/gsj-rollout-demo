@@ -61,7 +61,7 @@ preconditions**, both worth checking before you start:
 ```bash
 mkdir -p gsj-demo && cd gsj-demo                 # the venv lands here, the clone beside it
 python3 -m venv .venv && . .venv/bin/activate    # PEP 668 systems refuse a bare pip install
-pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.16' pyarrow
+pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.17' pyarrow
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 # a new shell later? `. ../.venv/bin/activate` here first — the scripts need the venv's PyYAML
 
@@ -109,7 +109,7 @@ repo learned that as
   broken package (round five: two more strangers lost their first
   install, one to each signature; cost of the second, one wrong
   diagnosis). The cure is pip's own, for both:
-  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.16' pyarrow`
+  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.17' pyarrow`
   — the same command with two flags; an unchanged retry also recovers when
   the drop was transient. `docker pull` has three bullets of this guidance
   below; the install needed one. You bring Docker with the `docker compose`
@@ -176,9 +176,10 @@ repo learned that as
 - **Platform fact 1 — Apple Silicon / ARM works, said out loud.** All
   four images run natively: `gsj-mcp-service` publishes
   `linux/amd64` + `linux/arm64` under one tag since library CP-61's 0.4.0
-  (this checkout pins `0.5.0`, the decisions surface — library CP-79; its
-  amd64 predecessor ran ~2 min under emulation for the first embed; the
-  native first embed measured 22 s), `gsj-pi-harness:pi0.83.0-3` since
+  (this checkout pins `0.5.1`, with behavior-preserving Starlette response
+  helpers and the decisions surface from `0.5.0`; historically, the amd64
+  predecessor ran ~2 min under emulation for the first embed and the native
+  first embed measured 22 s), `gsj-pi-harness:pi0.83.0-3` since
   library CP-64 (republished as a two-platform index under the same
   pinned tag, the amd64 child byte-unchanged), and `gsj-polar` always
   did. History, for anyone reading an old trace: before library CP-64 an
@@ -217,7 +218,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97) → 0.1.13 (library CP-100) → 0.1.14 (library CP-102) → 0.1.15 (library CP-105) → 0.1.16 (library CP-106)): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97) → 0.1.13 (library CP-100) → 0.1.14 (library CP-102) → 0.1.15 (library CP-105) → 0.1.16 (library CP-106) → 0.1.17 (estate/lock-reader refactoring)): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -430,8 +431,9 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
-Library 0.1.16 is the floor (library CP-106): the host tool and pinned Polar
-image carry the estate phase cleanup, with runtime behavior preserved. The `up`
+Library 0.1.17 is the floor: the host tool and pinned Polar image carry the
+estate activation and generated-lock reader refactoring. Retrieval image 0.5.1
+carries the Starlette response helpers. Existing behavior is preserved. The `up`
 this script drives still lists the rows `--row N` addresses under the taskbank line of its
 `== run demo ==` block — the block this script echoes before it stands its own
 Polar leg — and its Forgejo pull's heartbeat, when a pull is slow enough to print
@@ -473,7 +475,7 @@ mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands H
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
 pip install --timeout 120 --retries 5 \
-  'gsj-harness-rollout-server>=0.1.16' pyarrow   # the library + the taskbank's parquet writer
+  'gsj-harness-rollout-server>=0.1.17' pyarrow   # the library + the taskbank's parquet writer
                                                  # (add `pytest` to run the regression suite,
                                                  # README's last section). The two flags are IN
                                                  # this line on purpose: pip's default 15 s read
@@ -689,7 +691,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.16 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```
@@ -729,7 +731,7 @@ built for it. Run row 3 beside row 2:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.16 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 3 --task-id easement
 ```
@@ -787,7 +789,7 @@ then reads `split None` — a triple submit records no split):
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.16 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --case case_orchard --timestep 2 --task-id easement-t2 \
     --prompt 'Is there an easement deed in the case file so far? If so, which page records it, what is the deed number and when was it registered? Cite the page as (page:N).'
@@ -922,7 +924,7 @@ search them):
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.16 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 0 --task-id precedent
 ./read.py show            # the hits render as court, docket, Randnummer, the citation each admits
@@ -1346,6 +1348,10 @@ CP-104, and a round-seven reader filed it as history standing in front of the
 commands (F-127). The floors before 0.1.10 are the chronology in the stale-0.1.3
 bullet under [What to expect, measured](#what-to-expect-measured).
 
+- **0.1.17**: estate activation and generated-lock reader refactoring in the
+  host tool and matching Polar image, plus retrieval image **0.5.1** with
+  Starlette response helpers. Existing behavior, models, persisted formats
+  and walkthrough requirements are preserved.
 - **0.1.16** (library CP-106): an internal estate phase cleanup with behavior
   preserved. The host floor and matching Polar image carry the same release;
   the walkthrough and its evidence requirements are unchanged.
