@@ -383,3 +383,47 @@ push, so its session ids cannot be written into it. What this demo does not take
 (F-122, F-123) and its own heartbeat (F-128) wait on the next `bootstrap.py` lift, and F-87, F-92 and F-120 on
 the `read.py` export bump; and what the LIBRARY does not carry at 0.1.15: row 110's `| tee` status, row 108's
 `cli.py` NOTE, and row 112's residue.
+
+CP-106 (2026-09-11): PyPI published the 0.1.16 wheel at 2026-09-11T02:52:06.508058Z;
+demo edits began at 2026-09-11T03:07:32.152838+00:00, after both platform image proofs passed and the library's
+`main` was advanced to release `3b25931ccd7cf0fd2dc3237bfc7f73c552e55260`. The host floor, remedies,
+`polar.Dockerfile` default and all four `docker run` recipes select 0.1.16. This is the
+library's behavior-preserving estate phase cleanup: the eight execution-shell modules
+retain their bytes apart from the version literal; the two packaged estate/corpus
+tools carry the refactoring. The existing source boundary and packaging remain in force.
+
+The image was built once from public `LIB_REF=v0.1.16` and PyPI `LIB_VERSION=0.1.16`.
+The build consumed this demo's pre-update Dockerfile
+`e18f7b247e16de2170fd2c6061919656e7492b7e6d89e85b3103aee31b44a4c0` with those explicit arguments;
+this commit advances its default to the same library version. The public wheel is
+`gsj_harness_rollout_server-0.1.16-py3-none-any.whl`, SHA-256
+`7eba96f16eb749638aa48ad70111d92469999b1bd44918fbcc5162c24cd018e3`.
+
+Published image `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.16`, index `sha256:1ae10e8c23c280c2e04e0d80619c209cce0b2ef93c71edec7c6eeaebe45732ec`:
+
+- linux/amd64 `sha256:68bdc65fd9280fa845aaa8756fce6e0a24c07036a14aa9898fd4dc0985eff36f`
+- linux/arm64 `sha256:d5942f974501a70726470a55592428f09a043266218e48abb5d36e3fe3a174d1`
+
+Both manifests were read anonymously and both children were pulled with an empty Docker
+authentication configuration. Both runtime probes report 0.1.16 and the exact release
+source above. All ten packaged Python modules and all three pins/resource files match
+the independently installed public wheel byte for byte. PiHarness and the validating
+builder subclass Polar's bases; CP-98/CP-99, CP-101 and CP-104 checks and the CP-106 phase
+invocation/result checks pass in both children. The host is arm64: arm64 is native to its
+Docker Linux VM and amd64 runs under emulation; these are not two native hosts.
+
+The order follows the library's ADR-0043, image before front door. The first retained
+anonymous index 200 was observed at 2026-09-11T03:00:30.288112+00:00,
+503.780 seconds after PyPI publication;
+both runtime proofs finished at 2026-09-11T03:02:41.896632+00:00.
+These are observed bounds, not the exact first global availability instant. An initial
+probe's incorrect assumption that `POLAR_SHA` held a bare SHA was retained as an
+instrumentation failure; the corrected probe checks the unchanged full marker bytes.
+The image was neither rebuilt nor pushed again for that correction.
+
+This entry records the image leg. Fresh-clone t=4/t=2 episodes and independent archive
+readback remain separate consumer gates before pushing the exact demo commit; their
+results belong in the library's CP-106 completion record. MCP 0.5.0, the pi0.83.0-3
+sandbox, Polar patches, demo bootstrap behavior and reader behavior are unchanged.
+The findings awaiting a bootstrap lift or reader export change remain recorded in
+their existing entries; this release adds no defect correction or architectural decision.
