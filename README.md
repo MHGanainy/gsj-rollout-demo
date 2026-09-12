@@ -61,7 +61,7 @@ preconditions**, both worth checking before you start:
 ```bash
 mkdir -p gsj-demo && cd gsj-demo                 # the venv lands here, the clone beside it
 python3 -m venv .venv && . .venv/bin/activate    # PEP 668 systems refuse a bare pip install
-pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.17' pyarrow
+pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.18' pyarrow
 git clone https://github.com/MHGanainy/gsj-rollout-demo && cd gsj-rollout-demo
 # a new shell later? `. ../.venv/bin/activate` here first — the scripts need the venv's PyYAML
 
@@ -109,7 +109,7 @@ repo learned that as
   broken package (round five: two more strangers lost their first
   install, one to each signature; cost of the second, one wrong
   diagnosis). The cure is pip's own, for both:
-  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.17' pyarrow`
+  `pip install --timeout 120 --retries 5 'gsj-harness-rollout-server>=0.1.18' pyarrow`
   — the same command with two flags; an unchanged retry also recovers when
   the drop was transient. `docker pull` has three bullets of this guidance
   below; the install needed one. You bring Docker with the `docker compose`
@@ -218,7 +218,7 @@ repo learned that as
   collapses the repetition and says NO deliverable was written.
   Acceptance checks **provenance, not task success**. Two lines you would
   only ever have seen on a stale library 0.1.3 install (cured at the
-  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97) → 0.1.13 (library CP-100) → 0.1.14 (library CP-102) → 0.1.15 (library CP-105) → 0.1.16 (library CP-106) → 0.1.17 (estate/lock-reader refactoring)): a false `pins —
+  library's CP-62, shipped in 0.1.4 — this demo's floor moved 0.1.4 → 0.1.6 → 0.1.7 → 0.1.8 (library CP-85) → 0.1.9 (library CP-91) → 0.1.10 (library CP-93) → 0.1.11 (library CP-95) → 0.1.12 (library CP-97) → 0.1.13 (library CP-100) → 0.1.14 (library CP-102) → 0.1.15 (library CP-105) → 0.1.16 (library CP-106) → 0.1.17 (estate/lock-reader refactoring) → 0.1.18 (native Docker pull output)): a false `pins —
   WARNING: 1/1 skill card(s) are not in the packaged approved set (G1)`
   (0.1.3 checked the library's *packaged* pins, not the ones this script
   derives for your corpus; library wishlist 51 (c)) and `ports — 8080 is
@@ -284,11 +284,11 @@ repo learned that as
   "one keystroke from killing it"; the whole image took 45 min on that pipe;
   another stranger's took 39). `docker pull` prints a line only when a
   layer *changes state*, so a single large layer on a slow pipe prints
-  nothing until it lands — the "~4 min" above is a fast pipe. Since
-  library CP-94 `up` prints a heartbeat once a minute during a pull
-  (elapsed time, and whether this host received bytes in the last minute),
-  and `./bootstrap.py status` says `ACTIVE` while an `up` runs. **Since
-  library CP-96 the heartbeat also names the layer phase** — `N/M layers
+  nothing until it lands — the "~4 min" above is a fast pipe. This demo's
+  three image pre-pulls still print a heartbeat once a minute (elapsed time,
+  and whether this host received bytes in the last minute), and
+  `./bootstrap.py status` says `ACTIVE` while an `up` runs. The demo's
+  heartbeat also names the layer phase — `N/M layers
   complete`, then whichever of `K extracting`, `K downloaded, waiting to
   extract` and `J downloading` apply, in that order (a round-seven reader met
   the third and checked it against this sentence) — and says when **no bytes
@@ -297,9 +297,13 @@ repo learned that as
   said "26.0 KiB in the last 60s — the pipe is moving" through forty
   minutes of that, and a stranger counted `Download complete` against
   `Pull complete` by hand to tell a phase change from a stall. Before you
-  conclude a silent pull hung, three checks, in order: (1) the heartbeat
-  (or `./bootstrap.py status`) — if the host is still receiving bytes it
-  is slow, not hung, and if it says extraction, a quiet pipe is expected;
+  conclude a silent pull hung, three checks, in order: (1) Docker's output
+  and the demo's heartbeat, when present. The library-owned pull (including
+  Forgejo) uses Docker's native stdout from 0.1.18 and has no custom heartbeat
+  or layer tally; redirected transfers may be quiet. `./bootstrap.py status`
+  reports `ACTIVE`, which identifies the running command rather than proving
+  download progress. Host traffic is shared, and extraction can leave the
+  network quiet;
   (2) **`df --block-size=1M`** on the daemon's data root (`docker info --format
   '{{.DockerRootDir}}'`) twice a minute apart — it grows as layers land.
   **Megabytes, not `df -h`**: at this project's bandwidth a human-readable
@@ -431,14 +435,17 @@ a non-Qwen model's automatic pin derivation, vLLM's `/tokenize` +
 
 ## Run it
 
-Library 0.1.17 is the floor: the host tool and pinned Polar image carry the
-estate activation and generated-lock reader refactoring. Retrieval image 0.5.1
-carries the Starlette response helpers. Existing behavior is preserved. The `up`
-this script drives still lists the rows `--row N` addresses under the taskbank line of its
-`== run demo ==` block — the block this script echoes before it stands its own
-Polar leg — and its Forgejo pull's heartbeat, when a pull is slow enough to print
-one, says how long the layer tally has stood unchanged. What each earlier floor
-added is at the end, under [What each floor carried](#what-each-floor-carried): it
+Library 0.1.18 is the floor: the host tool and pinned Polar image use Docker's
+native stdout for library-owned pulls, including Forgejo. Redirected transfers
+may be quiet. After Docker exits, the library allows its stderr reader up to ten
+seconds to finish, returning sooner if it finishes; stdout has no separate wait.
+This is no execution timeout or partial-capture guarantee: stderr is still read
+as a whole. The demo's own three image pre-pulls retain their heartbeat. Retrieval
+image 0.5.1, image policy, readiness and recovery are unchanged. The `up` this
+script drives still lists the rows `--row N` addresses under the taskbank line of
+its `== run demo ==` block — the block this script echoes before it stands its
+own Polar leg. What each earlier floor added is at the end, under
+[What each floor carried](#what-each-floor-carried): it
 stood here, forty lines of it in front of the commands, until a round-seven reader
 filed it (F-127). One piece of it you need here: the estate writes three
 `rollout.yaml` files — the bring-up's own `work/runs/demo/rollout.yaml`, for a
@@ -475,7 +482,7 @@ mkdir -p gsj-demo && cd gsj-demo     # a directory of your own: the venv lands H
 python3 -m venv .venv && . .venv/bin/activate   # PEP 668 systems (Ubuntu >= 23.04)
                                                 # refuse a bare pip install
 pip install --timeout 120 --retries 5 \
-  'gsj-harness-rollout-server>=0.1.17' pyarrow   # the library + the taskbank's parquet writer
+  'gsj-harness-rollout-server>=0.1.18' pyarrow   # the library + the taskbank's parquet writer
                                                  # (add `pytest` to run the regression suite,
                                                  # README's last section). The two flags are IN
                                                  # this line on purpose: pip's default 15 s read
@@ -691,7 +698,7 @@ or exported; the token never reaches a trace:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 2
 ```
@@ -731,7 +738,7 @@ built for it. Run row 3 beside row 2:
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 3 --task-id easement
 ```
@@ -789,7 +796,7 @@ then reads `split None` — a triple submit records no split):
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --case case_orchard --timestep 2 --task-id easement-t2 \
     --prompt 'Is there an easement deed in the case file so far? If so, which page records it, what is the deed number and when was it registered? Cite the page as (page:N).'
@@ -924,7 +931,7 @@ search them):
 docker run --rm --network gsj-demo-net \
   -v "$PWD/work/estate:/estate" -v "$PWD/work/runs/demo/.env:/estate/.env:ro" \
   -v "$PWD/corpus-synthetic:/corpus" -e GSJ_PINS_PATH=/estate/pins.gsj.json \
-  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17 \
+  ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18 \
   gsj-rollout submit --config /estate/rollout.yaml \
     --from-bank /corpus/taskbank.parquet --row 0 --task-id precedent
 ./read.py show            # the hits render as court, docket, Randnummer, the citation each admits
@@ -1348,6 +1355,13 @@ CP-104, and a round-seven reader filed it as history standing in front of the
 commands (F-127). The floors before 0.1.10 are the chronology in the stale-0.1.3
 bullet under [What to expect, measured](#what-to-expect-measured).
 
+- **0.1.18**: library-owned pulls inherit Docker's native stdout, without the
+  custom layer tally or heartbeat. Redirected transfers may be quiet. After
+  Docker exits, the stderr reader has up to ten seconds to finish, returning
+  sooner on completion; there is no separate stdout wait. This is neither a
+  Docker execution timeout nor a partial-capture guarantee; stderr remains a
+  whole read. Caller diagnostics, image policy, readiness and recovery remain
+  unchanged. The demo's own pre-pull heartbeat and retrieval 0.5.1 remain.
 - **0.1.17**: estate activation and generated-lock reader refactoring in the
   host tool and matching Polar image, plus retrieval image **0.5.1** with
   Starlette response helpers. Existing behavior, models, persisted formats

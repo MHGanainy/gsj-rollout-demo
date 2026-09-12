@@ -61,16 +61,16 @@ try:
     import yaml
 except ImportError:
     print("bootstrap: PyYAML is missing. It rides the library install:\n"
-          "  pip install 'gsj-harness-rollout-server>=0.1.17' pyarrow", file=sys.stderr)
+          "  pip install 'gsj-harness-rollout-server>=0.1.18' pyarrow", file=sys.stderr)
     sys.exit(2)
 
 HERE = Path(__file__).resolve().parent
 
 # ---- the estate's published artifacts, pinned -------------------------------
-POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.17"   # library 0.1.17: estate activation and generated-lock reader refactoring
+POLAR_IMAGE = "ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18"   # library 0.1.18: native Docker pull output and bounded stderr completion
 MCP_IMAGE = "ghcr.io/mhganainy/gsj-mcp-service:0.5.1"       # multi-arch; behavior-preserving Starlette response helpers; 0.5.0's decisions surface retained
 SANDBOX_IMAGE = "ghcr.io/mhganainy/gsj-pi-harness:pi0.83.0-3"   # linux/amd64 + linux/arm64 index since library CP-64 (F-54 closed)
-LIB_MIN = (0, 1, 17)         # host tooling and the pinned Polar image carry the same release
+LIB_MIN = (0, 1, 18)         # host tooling and the pinned Polar image carry the same release
 REFERENCE_MODEL = "Qwen/Qwen3-0.6B"   # the estate every packaged pin came from
 
 # ---- the run: the library's bring-up names everything after it -------------
@@ -377,16 +377,15 @@ def check_library() -> None:
     except ImportError:
         die("the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.17' pyarrow  (same environment "
+            "pip install 'gsj-harness-rollout-server>=0.1.18' pyarrow  (same environment "
             "you run bootstrap.py from)")
     import gsj_rollout
     have = tuple(int(x) for x in gsj_rollout.__version__.split("."))
     if have < LIB_MIN:
-        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.17 "
-            "carries the behavior-preserving estate activation and generated-lock reader "
-            "refactoring, alongside retrieval image 0.5.1's Starlette response helpers. "
-            "The existing estate, corpus and response contracts are preserved.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.17' pyarrow")
+        die(f"library {gsj_rollout.__version__} predates this demo's floor — 0.1.18 "
+            "carries Docker's native pull stdout and up to ten seconds for stderr to finish "
+            "after Docker exits. Image policy, readiness and recovery are preserved.",
+            "pip install -U 'gsj-harness-rollout-server>=0.1.18' pyarrow")
     # the WHEEL shape: the bring-up, the pipeline and the packaged pins are
     # force-included at build time — a source/editable checkout of the
     # library has none of them under gsj_rollout/
@@ -395,7 +394,7 @@ def check_library() -> None:
     if find_spec("gsj_rollout.estate") is None or not (root / "pins" / "pins.gsj.json").is_file():
         die(f"this python has the library as a source checkout ({root}), not the wheel — "
             "the estate tool, the corpus pipeline and the packaged pins ship only in the wheel.",
-            "pip install 'gsj-harness-rollout-server>=0.1.17' pyarrow  (from PyPI, into the "
+            "pip install 'gsj-harness-rollout-server>=0.1.18' pyarrow  (from PyPI, into the "
             "environment you run bootstrap.py from)")
     # what the bring-up refuses on, checked here BEFORE the image pulls
     try:
@@ -789,12 +788,12 @@ def reference_capture() -> "tuple[bytes, int, int]":
     if spec is None or not spec.origin:
         die(f"the gsj-harness-rollout-server library is not importable from this python "
             f"({sys.executable}).",
-            "pip install 'gsj-harness-rollout-server>=0.1.17' pyarrow  (same environment)")
+            "pip install 'gsj-harness-rollout-server>=0.1.18' pyarrow  (same environment)")
     pins_root = Path(spec.origin).parent / "pins"
     cap = pins_root / "container" / "system_prompt.container.derived.txt"
     if not cap.is_file():
         die(f"the installed library ships no G2 capture at {cap}.",
-            "pip install -U 'gsj-harness-rollout-server>=0.1.17' (the capture ships "
+            "pip install -U 'gsj-harness-rollout-server>=0.1.18' (the capture ships "
             "since 0.1.3)")
     ref_prompt = cap.read_bytes()
     approved = json.loads((pins_root / "pins.gsj.json").read_text())["pins"]["system_prompt_hash"]
@@ -802,7 +801,7 @@ def reference_capture() -> "tuple[bytes, int, int]":
         die("the library's packaged G2 capture does not hash into its own packaged "
             "system_prompt_hash — the installed wheel is inconsistent.",
             "reinstall the library (pip install -U --force-reinstall "
-            "'gsj-harness-rollout-server>=0.1.17') and report it if that does not cure it")
+            "'gsj-harness-rollout-server>=0.1.18') and report it if that does not cure it")
     if ref_prompt.count(_AGENTS_OPEN) != 1 or ref_prompt.count(_AGENTS_CLOSE) != 1:
         die("the packaged G2 capture does not embed AGENTS.md between pi's "
             "<project_instructions> markers exactly once — the substitution "

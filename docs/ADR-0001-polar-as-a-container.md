@@ -498,3 +498,110 @@ pushing this exact demo commit; their results belong in the library's
 release completion record. The earlier t=2 hallucination remains disclosed:
 cutoff/provenance validation does not establish answer truthfulness.
 The `pi0.83.0-3` sandbox and parked bootstrap/reader findings remain unchanged.
+
+Release 0.1.18 (2026-09-12 UTC): the host floor, remedies, Dockerfile default
+and current image recipes advance to 0.1.18. The library release source is
+`989060c8fe4c924152337797b6a93e79e389b72a`, public tag `v0.1.18` (annotated
+tag object `b5256891a6a2437b37c8ccc56a7df661e5bd63a5`). Library-owned Docker
+pulls now inherit stdout, removing custom telemetry and rendering. After the
+ordinary process wait, the existing stderr reader receives up to ten seconds
+to finish, returning sooner when finished; inherited stdout has no separate
+wait. Redirected transfers may be quiet. This is neither a Docker execution
+timeout nor a partial-stderr guarantee: whole-read capture remains.
+
+PyPI published `gsj_harness_rollout_server-0.1.18-py3-none-any.whl` at
+`2026-09-12T09:22:01.534702Z`, SHA-256
+`995013873f545a3127e0bccdc4e3e8ebe8286554264aa81fed66a8b9693d3b00`.
+The existing estate build context, public `LIB_REF=v0.1.18` clone and named
+PyPI `LIB_VERSION=0.1.18` install were retained. Its tracked Dockerfile change
+is only the version default. For this build, an ephemeral operational copy
+pins the two FROM indexes and exact Python versions independently measured
+from both actual 0.1.17 children; a BuildKit secret supplies ordinary pip
+constraints without adding a runtime file. The unchanged apt layers were
+reused. No local library wheel was handed into the image.
+
+The first AMD build attempt failed resolving the exact PyArrow 25.0.1
+candidate. Independent public index and actual interpreter-tag probes
+established a compatible non-yanked wheel; the unchanged constrained retry
+succeeded. The initial resolver failure remains recorded, with its precise
+cause unestablished. No dependency or assertion was relaxed.
+
+Published Polar image `ghcr.io/mhganainy/gsj-polar:f0e8343a-gsj0.1.18`,
+index `sha256:0c390d419f0c1403ecb79adbb24bfa75a6f2e7fa6c04b177d6d49bb7161bbe71`:
+
+- linux/amd64 manifest `sha256:52c608d612a28c1865c48500a57d062e11b0084e6e0d967a9fa1094f519a70bd`,
+  config `sha256:29df3d7e8b8261e5cac4864a0f36cb0428d9c66126170fc845bf1b5e89fd3117`.
+- linux/arm64 manifest `sha256:e86c87ab75d23d380347bc06dcc009bfb60e69e78fea4cf109848c70252e5c11`,
+  config `sha256:b34aa65a1d0b7ee8fa336e228158b8c837de736f643014089cab17ca6a4163bc`.
+
+Both public child manifests/configurations were read anonymously and both
+children were pulled with an empty Docker authentication configuration. Their
+runtime probes report the exact release source and public wheel payloads;
+local and published index/config bytes and pristine runtime closures match.
+The same tested index was pushed without rebuilding. Two initial normal
+pushes failed at one layer with registry EOF; the exact tested compressed
+blob was then delivered through the established streaming PATCH/empty-PUT
+protocol before the normal same-index push succeeded. Failed range/header
+observer attempts and their corrections remain recorded in the release
+report; no source, dependency or assertion was relaxed.
+
+The normal image push completed at `2026-09-12T10:26:18.458382+00:00`.
+The first retained anonymous index 200 was observed at
+`2026-09-12T10:26:55.721703+00:00`, 3894.187001 seconds after PyPI upload;
+both anonymous pulls completed at `2026-09-12T10:27:27.485762+00:00` and
+both runtime probes at `2026-09-12T10:27:34.738481+00:00`.
+These are observed bounds, not the first instant of global availability.
+The anonymous proof's container/volume/network inventory was restored.
+
+The actual published ARM child passed all 23 installed lifecycle tests
+(58.764 seconds), with zero failures/errors/skips. The first caller collection
+failed because the private observer mounted its output too shallowly for the
+unchanged test module's source-path default. Correcting only that output
+mount depth retained all test bytes, assertions and deadlines; the caller-only
+rerun passed all 11 selected cases (15.15 seconds), with four explicit fixture
+or checkout-only deselections and zero skips. Passed lifecycle evidence was
+reused by exact image/source identity. Only disposable observer layers received
+pytest; the pristine published image was never changed or republished.
+
+The AMD emulation attempt first exceeded its observer's aggregate 180-second
+budget. Increasing only the private aggregate budget allowed a complete result:
+23 lifecycle cases, seven timing failures, zero errors/skips. Four ready-marker
+deadlines, two worker deadlines and one elapsed-time assertion failed under
+emulation. Those results remain recorded; no test assertion or inner deadline
+was relaxed and no emulated pass is claimed.
+
+The same immutable published AMD child then passed on a native GitHub X64
+Linux runner: all 23 lifecycle tests (55.222 seconds) and all 11 selected
+caller tests (2.311 seconds), with four explicit deselections and zero
+failures/errors/skips. The original observer and every test/worker deadline
+were unchanged. [Run 34690077750](https://github.com/MHGanainy/gsj-harness-rollout-server/actions/runs/34690077750)
+used operational workflow commit `b57e38c8a25fbbb28d8d5e558449cefab8a3dc03`,
+explicitly checking out the release source above; the workflow commit is
+separate from the package/tag/source identity. It verified all 13 payloads,
+the pristine runtime closure and raw index/manifest/config identities, and
+removed its owned container. The earlier operational workflow at
+`fd18ad252170365bb42a6e70b277463a24abc4bd` was rejected before any jobs/tests;
+no native proof is credited to it. Emulation failures remain disclosed.
+The hosted Docker engine reports the AMD config digest as its loaded image
+Id; the local containerd engine reported the child manifest as its projected
+Id. Those observations do not change either OCI identity.
+
+Both pristine local children preserve the 21-distribution closure apart from
+root 0.1.17 to 0.1.18, all 118 dpkg records, Python and Docker CLI binary
+bytes, runtime configuration, Polar marker and all 91 installed Polar
+package files. All ten packaged Python modules and three pins/resource files
+match the independently downloaded public wheel. The local pristine image
+probes ran ARM natively in the ARM Docker Linux VM and AMD under emulation;
+focused native-platform test results are distinguished above. No native H200
+proof is claimed. Retrieval remains the existing 0.5.1 image; pi, Polar patches,
+dependencies, models, pins, persisted formats and historical selections
+remain fixed.
+
+This factual artifact-delivery entry follows the library's ADR-0043/A-28
+ordering and leaves this ADR's accepted decision and earlier entries intact.
+Fresh-clone t=4/t=2 episodes, independent archive readback and failure/cure
+routes remain separate consumer gates before pushing this exact demo commit;
+their results belong in the library's release completion record. Earlier
+hallucination evidence remains disclosed: admission and provenance do not
+establish answer truthfulness. Demo bootstrap's own pre-pull telemetry and
+parked bootstrap/reader findings remain unchanged.
